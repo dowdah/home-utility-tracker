@@ -129,9 +129,9 @@ Authorization: Bearer <per-device token>
 
 ### FastAPI 服务
 
-建立独立的原生 Python 项目，例如 `/home/utility-sync/utility-sync/`：使用 `uv sync --frozen` 安装锁定依赖，并由专用 Unix 服务帐号的 systemd unit 执行 `uv run --frozen uvicorn utility_sync.api:app --host 127.0.0.1 --port 8088 --workers 1`。先使用一个 Uvicorn worker；FastAPI 只提供 `/healthz`、`/meta`、`/sync`、`/exports/*.csv` 和本地 CLI 管理命令。数据库访问使用一个明确的写事务队列或短事务，避免长读事务。
+建立独立的原生 Python 项目，例如 `/opt/utility-sync/`：管理员先以 `uv sync --frozen --no-dev` 安装锁定依赖，再由专用 Unix 服务帐号的 systemd unit 执行 `uv run --frozen --no-sync uvicorn utility_sync.api:app --host 127.0.0.1 --port 8088 --workers 1`。服务启动前只运行幂等 schema migration，不在运行时写入应用目录或安装依赖。先使用一个 Uvicorn worker；FastAPI 只提供 `/healthz`、`/meta`、`/sync`、`/exports/*.csv` 和本地 CLI 管理命令。数据库访问使用一个明确的写事务队列或短事务，避免长读事务。
 
-持久数据建议放在新建的非 SMB 可写目录，例如 `/srv/utility-meter/`，容器以专用非 root 用户写入：
+持久数据建议放在新建的非 SMB 可写目录，例如 `/srv/utility-meter/`，服务以专用非 root 用户写入：
 
 ```text
 /srv/utility-meter/
@@ -184,8 +184,8 @@ Cloudflare Tunnel 可保留为今后的应急路径，但 V1 不应同时运行�
 
 * 每天运行一次 SQLite online backup，备份完成后校验可打开、记录 SHA-256，再原子移动到备份目录。
 * 导出 CSV 也从一致性只读事务生成到临时文件后原子改名；SMB 只发布 `exports/` 和已完成的备份副本，不发布 `data/`。
-* 初始保留策略：14 个日备份、12 个每月备份；删除旧备份前重新列出精确文件名并记录操作。不得使用宽泛 glob 清理。
-* 低于 20 GiB 可用空间时备份任务报错并生成可见告警；低于 10 GiB 时同步服务只允许读取/导出，并提示先处理 `sharedfiles` 的大文件。实际清理需另行授权，绝不由应用自行删除用户下载内容。
+* 初始保留策略：14 个日备份、12 个每月备份；已发布备份（SQLite 文件和 SHA-256）总预算为 128 MiB。每次成功校验并原子发布新备份后，重新列出并记录超期备份的精确文件名，再仅清理这些服务自身的备份及其校验文件；不得使用宽泛 glob，更不得触及 `sharedfiles` 内容。
+* 备份目录所在文件系统可用空间低于 256 MiB 时，备份任务报错并生成可见告警；这是创建临时副本和原子发布的安全余量，不是 128 MiB 备份预算。低于 10 GiB 时同步服务只允许读取/导出，并提示先处理 `sharedfiles` 的大文件。实际清理需另行授权，绝不由应用自行删除用户下载内容。
 * 每个备份至少进行一次恢复演练：在临时目录打开副本、运行完整性检查，并对比读数/修订数量；健康检查 200 不是恢复能力的证明。
 
 ## API 最小面与运维边界
@@ -205,7 +205,7 @@ Cloudflare Tunnel 可保留为今后的应急路径，但 V1 不应同时运行�
 2. **后端最小闭环**：schema migration（建议 Alembic）、token hash、`/meta`、`/sync`、单机 SQLite 事务与 change log。为同一 `operation_id` 重试、版本冲突、tombstone、分页写集成测试。
 3. **Android 本地闭环**：Room migration、读数录入/编辑/删除、价格历史、end-of-interval 统计，确保断网时所有页面仍可读写。
 4. **同步闭环**：两台设备离线各自新增后同步、同条记录并发编辑产生可见 conflict、删除离线再同步、网络超时后幂等重试、应用重启后 WorkManager 恢复。
-5. **受限部署**：以 `uv sync --frozen` 安装锁定依赖，启用专用 systemd service 并发布 API 到 `.200` 的 `127.0.0.1:8088`，先以 Pi 本机 curl 验证；建立 ECS 回环 `127.0.0.1:18088` 的独立反向隧道，确认 ECS 本机 curl 后再添加 Nginx TLS vhost。以 systemd daily timer 运行 SQLite online backup。依次验证 TLS、401、有效 token、手机实际同步。任何一层失败都不称为上线完成。
+5. **受限部署**：由管理员在 `/opt/utility-sync` 执行 `uv sync --frozen --no-dev`，启用专用 systemd service（运行时 `--no-sync`）并发布 API 到 `.200` 的 `127.0.0.1:8088`，先以 Pi 本机 curl 验证；建立 ECS 回环 `127.0.0.1:18088` 的独立反向隧道，确认 ECS 本机 curl 后再添加 Nginx TLS vhost。以 systemd daily timer 运行 SQLite online backup。依次验证 TLS、401、有效 token、手机实际同步。任何一层失败都不称为上线完成。
 6. **数据保障验收**：CSV 打开正确、SQLite 备份校验和恢复演练通过、备份保留按精确文件清单执行、磁盘告警可见。
 
 ## 尚待用户决定的产品项
