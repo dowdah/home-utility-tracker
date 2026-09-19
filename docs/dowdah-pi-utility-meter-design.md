@@ -6,14 +6,14 @@
 
 项目应维持为一个**本地优先的个人抄表系统**，而不是通用能源平台：Android 负责所有录入、历史和统计；树莓派是多设备同步、导出和备份的权威端。第一版只服务电、冷水、热水三类累计表读数。
 
-这台 Pi 已具备部署条件，但不是一台空闲专机。因此建议新增一个独立的 Docker Compose 栈，API 只发布到本机回环地址，并通过 ECS 上的 Nginx + 独立反向 SSH 隧道提供 HTTPS。该路径已经按现有摄像头隧道和 ECS 的实际能力核验为**架构可行**，但 `.200` 尚未获授新的受限隧道密钥；它不是立即可启动的部署项。这既避免新的公网监听端口，也不改动现有 Nextcloud、aria2、Samba、DDNSTO、SakuraFrp 或 OilWell edge-agent 的业务配置。
+这台 Pi 已具备部署条件，但不是一台空闲专机。因此建议以 `uv` 管理一个原生 Python/FastAPI 服务，由 systemd 托管单个 Uvicorn worker；API 只发布到本机回环地址，并通过 ECS 上的 Nginx + 独立反向 SSH 隧道提供 HTTPS。该路径已经按现有摄像头隧道和 ECS 的实际能力核验为**架构可行**，但 `.200` 尚未获授新的受限隧道密钥；它不是立即可启动的部署项。这既避免新的公网监听端口，也不改动现有 Nextcloud、aria2、Samba、DDNSTO、SakuraFrp 或 OilWell edge-agent 的业务配置。
 
 ## 已核验的主机事实
 
 | 项目 | 观察结果 | 对设计的影响 |
 |---|---|---|
 | 设备 | Raspberry Pi 4 Model B Rev 1.5，4 核 Cortex-A72，arm64 | 选择多架构/arm64 镜像；FastAPI + SQLite 负载远低于现有能力。 |
-| 系统 | Debian 13.4，内核 `6.12.75+rpt-rpi-v8`，Python 3.13.5，Docker 29.4.0 | 可用 Compose 独立部署；镜像要在 arm64 上实际验证。 |
+| 系统 | Debian 13.4，内核 `6.12.75+rpt-rpi-v8`，Python 3.13.5，Docker 29.4.0 | 使用 Python 3.13、`uv` 和 systemd 原生部署；不新增容器或镜像验证负担。 |
 | 内存 | 约 1.8 GiB RAM，约 1.2 GiB 可用；zram swap 1.8 GiB | 不上 PostgreSQL、Elasticsearch、监控全家桶或常驻图表服务。单个 Uvicorn worker 足够。 |
 | 磁盘 | `/dev/mmcblk0p2` 为 470 GiB ext4；已用 413 GiB（92%），余约 39 GiB；`/srv/sharedfiles` 占约 381 GiB | 小型数据库本身没有容量问题，但下载数据使整体余量偏低；必须有备份保留上限和低空间告警。 |
 | 网络 | `eth0` 为 `192.168.50.200/24`，有公网 IPv6；时间同步正常 | 局域网访问存在，但公网可达性和 DNS/TLS 映射尚未在本次调查中验证。 |
@@ -129,7 +129,7 @@ Authorization: Bearer <per-device token>
 
 ### FastAPI 服务
 
-建立独立栈：`/home/dowdah/stacks/utility-meter/compose.yaml`，包含一个 `utility-api` 容器。先使用一个 Uvicorn 进程/worker；FastAPI 只提供 `/healthz`、`/meta`、`/sync`、`/exports/*.csv` 和管理用的受保护端点。数据库访问使用一个明确的写事务队列或短事务，避免长读事务。
+建立独立的原生 Python 项目，例如 `/home/utility-sync/utility-sync/`：使用 `uv sync --frozen` 安装锁定依赖，并由专用 Unix 服务帐号的 systemd unit 执行 `uv run --frozen uvicorn utility_sync.api:app --host 127.0.0.1 --port 8088 --workers 1`。先使用一个 Uvicorn worker；FastAPI 只提供 `/healthz`、`/meta`、`/sync`、`/exports/*.csv` 和本地 CLI 管理命令。数据库访问使用一个明确的写事务队列或短事务，避免长读事务。
 
 持久数据建议放在新建的非 SMB 可写目录，例如 `/srv/utility-meter/`，容器以专用非 root 用户写入：
 
@@ -153,7 +153,7 @@ Android
        └─ ECS Nginx :443（现有 TLS 终止点）
             └─ proxy_pass http://127.0.0.1:18088
                  └─ 独立 SSH -R，仅监听 ECS 回环地址
-                      └─ .200 的 127.0.0.1:8088（Docker published loopback only）
+  └─ .200 的 127.0.0.1:8088（systemd 托管的原生 Uvicorn，仅回环监听）
                            └─ FastAPI + SQLite
 ```
 
@@ -205,7 +205,7 @@ Cloudflare Tunnel 可保留为今后的应急路径，但 V1 不应同时运行�
 2. **后端最小闭环**：schema migration（建议 Alembic）、token hash、`/meta`、`/sync`、单机 SQLite 事务与 change log。为同一 `operation_id` 重试、版本冲突、tombstone、分页写集成测试。
 3. **Android 本地闭环**：Room migration、读数录入/编辑/删除、价格历史、end-of-interval 统计，确保断网时所有页面仍可读写。
 4. **同步闭环**：两台设备离线各自新增后同步、同条记录并发编辑产生可见 conflict、删除离线再同步、网络超时后幂等重试、应用重启后 WorkManager 恢复。
-5. **受限部署**：发布 API 到 `.200` 的 `127.0.0.1:8088`，先以 Pi 本机 curl 验证；建立 ECS 回环 `127.0.0.1:18088` 的独立反向隧道，确认 ECS 本机 curl 后再添加 Nginx TLS vhost。依次验证 TLS、401、有效 token、手机实际同步。任何一层失败都不称为上线完成。
+5. **受限部署**：以 `uv sync --frozen` 安装锁定依赖，启用专用 systemd service 并发布 API 到 `.200` 的 `127.0.0.1:8088`，先以 Pi 本机 curl 验证；建立 ECS 回环 `127.0.0.1:18088` 的独立反向隧道，确认 ECS 本机 curl 后再添加 Nginx TLS vhost。以 systemd daily timer 运行 SQLite online backup。依次验证 TLS、401、有效 token、手机实际同步。任何一层失败都不称为上线完成。
 6. **数据保障验收**：CSV 打开正确、SQLite 备份校验和恢复演练通过、备份保留按精确文件清单执行、磁盘告警可见。
 
 ## 尚待用户决定的产品项
