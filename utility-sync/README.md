@@ -29,7 +29,7 @@ uv run pytest
 
 ## Deployment boundary
 
-The `ops/` units are systemd templates. Install the checked-out project at `/opt/utility-sync` (or consistently replace that path), create `/etc/utility-sync/environment` with private paths, and have an administrator run `uv sync --frozen --no-dev` before enabling the service.
+The `ops/` units are systemd templates. Install the checked-out project at `/opt/utility-sync` (or consistently replace that path), copy `ops/utility-sync.environment` to `/etc/utility-sync/environment` with mode `0640 root:utility-sync`, and have an administrator run `uv sync --frozen --no-dev` before enabling the service. The tracked template contains only paths and capacity thresholds; it must never contain tokens or private keys.
 
 The service deliberately listens on loopback only. The unit uses `uv run --frozen --no-sync`, so it starts only the already-installed environment and performs an idempotent migration. Confirm that `127.0.0.1:8088` is unused before installation.
 
