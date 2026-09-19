@@ -31,7 +31,9 @@ uv run pytest
 
 The `ops/` units are systemd templates. Install the checked-out project at `/opt/utility-sync` (or consistently replace that path), create `/etc/utility-sync/environment` with private paths, and have an administrator run `uv sync --frozen --no-dev` before enabling the service.
 
-The service deliberately listens on loopback only. The unit uses `uv run --frozen --no-sync`, so it starts only the already-installed environment and performs an idempotent migration. Confirm that `127.0.0.1:8088` is unused before installation. Reverse tunneling, web-server configuration, DNS, TLS, and token issuance are separate deployment decisions.
+The service deliberately listens on loopback only. The unit uses `uv run --frozen --no-sync`, so it starts only the already-installed environment and performs an idempotent migration. Confirm that `127.0.0.1:8088` is unused before installation.
+
+For the production ECS reverse-SSH topology, install `ops/utility-sync-tunnel.service` after creating a restricted `utility-tunnel` account on the ECS. It exposes only the Pi loopback listener through ECS loopback port `18089`; it requires a root-owned private key and pinned ECS host key in `/etc/utility-sync/`. Nginx, DNS, TLS, and token issuance remain separate deployment decisions.
 
 `utility-sync-backup.timer` creates an online SQLite backup only when at least 256 MiB is free. Published backups have a 128 MiB total budget, retain 14 daily and 12 monthly copies, and are pruned only by exact filenames after a verified new backup is published. Use `utility-sync prune-backups` to preview candidates; add `--apply` only when removal is intended.
 

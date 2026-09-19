@@ -1,0 +1,24 @@
+[Unit]
+Description=Expose Utility Sync to the ECS reverse proxy through reverse SSH
+After=network-online.target utility-sync.service
+Wants=network-online.target
+Requires=utility-sync.service
+
+[Service]
+Type=simple
+User=utility-sync
+Group=utility-sync
+ExecStartPre=/usr/bin/test -s /etc/utility-sync/utility-tunnel_ed25519
+ExecStartPre=/usr/bin/test -s /etc/utility-sync/known_hosts
+ExecStart=/usr/bin/ssh -NT -F /dev/null -i /etc/utility-sync/utility-tunnel_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/etc/utility-sync/known_hosts -o GlobalKnownHostsFile=/dev/null -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -R 127.0.0.1:18089:127.0.0.1:8088 utility-tunnel@101.133.108.172
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadOnlyPaths=/etc/utility-sync
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
