@@ -1,0 +1,24 @@
+[Unit]
+Description=Utility Sync FastAPI service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=utility-sync
+Group=utility-sync
+WorkingDirectory=/opt/utility-sync
+EnvironmentFile=/etc/utility-sync/environment
+ExecStartPre=/usr/local/bin/uv run --frozen --no-sync utility-sync migrate
+ExecStart=/usr/local/bin/uv run --frozen --no-sync uvicorn utility_sync.api:app --host 127.0.0.1 --port 8088 --workers 1
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/srv/utility-meter
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
