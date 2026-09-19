@@ -24,3 +24,4 @@ def test_reverse_tunnel_is_loopback_only_and_pins_its_host_key() -> None:
     assert "StrictHostKeyChecking=yes" in tunnel
     assert "UserKnownHostsFile=/etc/utility-sync/known_hosts" in tunnel
     assert "ServerAliveInterval=30" in tunnel
+    assert "User=root" in tunnel
