@@ -17,3 +17,10 @@ Utility Tracker is a private, local-first household meter log. Its primary job i
 - Landscape: navigation rail and multi-column meter cards. `values-land/dimens.xml` owns spacing and column count.
 - Card padding is 16dp, ordinary gaps are 8–12dp, and destructive actions only appear in an overflow menu followed by confirmation.
 - All strings originate in `values/` and `values-zh/`; timestamps display in the device zone but persist as UTC RFC 3339.
+
+## Remaining-reading semantics
+
+- All three meter types display remaining balances; new reading forms default to electricity.
+- Unknown consumption or cost uses an em dash with a localized reason. A known subtotal is labeled incomplete; a tariff-change estimate is labeled estimated.
+- An increasing balance can mean a top-up or input error. It must not become a negative consumption or an apparently complete zero bill.
+- Statistics scroll naturally in portrait and landscape; tariff recovery uses the existing tariff-history route.

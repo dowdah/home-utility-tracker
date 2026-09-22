@@ -10,6 +10,7 @@ import com.dowdah.utilitytracker.data.BackendRepository
 import com.dowdah.utilitytracker.data.DashboardData
 import com.dowdah.utilitytracker.data.EndpointEntity
 import com.dowdah.utilitytracker.data.SyncResult
+import com.dowdah.utilitytracker.data.defaultReadingMeterId
 import com.dowdah.utilitytracker.sync.SyncScheduler
 import java.time.Instant
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -69,7 +70,7 @@ class AppViewModel @Inject constructor(
     var readingNote: String
         get() = readingNoteState.value
         set(value) { readingNoteState.value = value; savedState["readingNote"] = value }
-    fun openNewReading(defaultMeterId: String) { readingEditorId = null; readingMeterId = defaultMeterId; readingValue = ""; readingRecordedAt = Instant.now().toString(); readingNote = ""; readingEditorOpen = true }
+    fun openNewReading() { readingEditorId = null; readingMeterId = defaultReadingMeterId(meters.value); readingValue = ""; readingRecordedAt = Instant.now().toString(); readingNote = ""; readingEditorOpen = true }
     fun openReading(reading: com.dowdah.utilitytracker.data.ReadingEntity) { readingEditorId = reading.id; readingMeterId = reading.meterId; readingValue = reading.valueDecimal; readingRecordedAt = reading.recordedAt; readingNote = reading.note.orEmpty(); readingEditorOpen = true }
     fun closeReadingEditor() { readingEditorOpen = false; readingEditorId = null }
     fun persistReadingDraft() = saveReading(readingEditorId, readingMeterId, readingValue, readingRecordedAt, readingNote.ifBlank { null }).also { closeReadingEditor() }

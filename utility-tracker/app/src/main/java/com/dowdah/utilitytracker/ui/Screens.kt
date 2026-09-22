@@ -76,7 +76,8 @@ import com.dowdah.utilitytracker.data.EndpointEntity
 import com.dowdah.utilitytracker.data.MeterEntity
 import com.dowdah.utilitytracker.data.ReadingEntity
 import com.dowdah.utilitytracker.data.TariffEntity
-import com.dowdah.utilitytracker.data.consumptionForRange
+import com.dowdah.utilitytracker.data.statisticsForRange
+import com.dowdah.utilitytracker.data.remainingReadingIncreases
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.LocalTime
@@ -135,7 +136,7 @@ fun RecordsScreen(viewModel: AppViewModel) {
                 FilterChip(selected = viewModel.recordFilter == null, onClick = { viewModel.recordFilter = null }, label = { Text(stringResource(R.string.all)) })
                 meters.forEach { meter -> FilterChip(selected = viewModel.recordFilter == meter.id, onClick = { viewModel.recordFilter = meter.id }, label = { Text(meterLabel(meter)) }) }
             }
-            Button(onClick = { viewModel.openNewReading(meters.firstOrNull()?.id.orEmpty()) }) { Icon(Icons.Default.Add, stringResource(R.string.add_reading)); Text(stringResource(R.string.add_reading)) }
+            Button(onClick = { viewModel.openNewReading() }) { Icon(Icons.Default.Add, stringResource(R.string.add_reading)); Text(stringResource(R.string.add_reading)) }
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(readings.filter { viewModel.recordFilter == null || it.meterId == viewModel.recordFilter }, key = { it.id }) { reading ->
                     ReadingCard(reading, meters.firstOrNull { it.id == reading.meterId }, onEdit = { viewModel.openReading(reading) }, onDelete = { deleteTarget = reading })
@@ -159,17 +160,17 @@ fun RecordsScreen(viewModel: AppViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun ReadingEditor(viewModel: AppViewModel, meters: List<MeterEntity>, existing: List<ReadingEntity>) {
-    var confirmLow by rememberSaveable { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = viewModel::closeReadingEditor, title = { Text(if (viewModel.readingEditorId == null) stringResource(R.string.add_reading) else stringResource(R.string.edit_reading)) }, text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    var confirmIncrease by rememberSaveable { mutableStateOf(false) }
+    AlertDialog(onDismissRequest = viewModel::closeReadingEditor, title = { Text(if (viewModel.readingEditorId == null) stringResource(R.string.add_reading) else stringResource(R.string.edit_reading)) }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         MeterChooser(meters, viewModel.readingMeterId) { viewModel.readingMeterId = it }
+        if (meters.none { it.id == viewModel.readingMeterId }) Text(stringResource(R.string.reading_meter_required), color = MaterialTheme.colorScheme.error)
         OutlinedTextField(viewModel.readingValue, { viewModel.readingValue = it }, label = { Text(stringResource(R.string.reading_value)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
         DateTimeField(viewModel.readingRecordedAt) { viewModel.readingRecordedAt = it }
         OutlinedTextField(viewModel.readingNote, { viewModel.readingNote = it }, label = { Text(stringResource(R.string.note)) }, modifier = Modifier.fillMaxWidth())
-    } }, confirmButton = { Button(onClick = {
-        val latest = existing.filter { it.meterId == viewModel.readingMeterId && it.id != viewModel.readingEditorId }.maxByOrNull { it.recordedAt }?.valueDecimal?.toBigDecimalOrNull()
-        if (latest != null && (viewModel.readingValue.toBigDecimalOrNull() ?: latest) < latest) confirmLow = true else viewModel.persistReadingDraft()
+    } }, confirmButton = { Button(enabled = meters.any { it.id == viewModel.readingMeterId } && (viewModel.readingValue.toBigDecimalOrNull()?.signum()?.let { it >= 0 } == true), onClick = {
+        if (remainingReadingIncreases(existing, viewModel.readingEditorId, viewModel.readingMeterId, viewModel.readingValue, viewModel.readingRecordedAt)) confirmIncrease = true else viewModel.persistReadingDraft()
     }) { Text(stringResource(R.string.save)) } }, dismissButton = { TextButton(onClick = viewModel::closeReadingEditor) { Text(stringResource(R.string.cancel)) } })
-    if (confirmLow) ConfirmationDialog(stringResource(R.string.low_reading), stringResource(R.string.low_reading), { confirmLow = false }) { viewModel.persistReadingDraft() }
+    if (confirmIncrease) ConfirmationDialog(stringResource(R.string.remaining_increased), stringResource(R.string.increase_confirmation), { confirmIncrease = false }) { confirmIncrease = false; viewModel.persistReadingDraft() }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -199,21 +200,34 @@ fun RecordsScreen(viewModel: AppViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatisticsScreen(viewModel: AppViewModel) {
+fun StatisticsScreen(viewModel: AppViewModel, onTariffs: () -> Unit) {
     val readings by viewModel.readings.collectAsState(); val tariffs by viewModel.tariffs.collectAsState(); val meters by viewModel.meters.collectAsState()
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 12.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp)) {
         OutlinedButton(onClick = { viewModel.rangePickerOpen = true }) { Text(stringResource(R.string.range) + ": " + (viewModel.statisticsStart?.take(10) ?: stringResource(R.string.all_time)) + " – " + (viewModel.statisticsEnd?.take(10) ?: stringResource(R.string.today))) }
-        meters.forEach { meter -> StatisticsCard(meter, readings.filter { it.meterId == meter.id }, tariffs.filter { it.meterId == meter.id }, viewModel.statisticsStart, viewModel.statisticsEnd) }
+        Text(stringResource(R.string.interval_attribution), style = MaterialTheme.typography.bodySmall)
+        meters.forEach { meter -> StatisticsCard(meter, readings.filter { it.meterId == meter.id }, tariffs.filter { it.meterId == meter.id }, viewModel.statisticsStart, viewModel.statisticsEnd, onTariffs) }
     }
     if (viewModel.rangePickerOpen) { val state = rememberDateRangePickerState(); DatePickerDialog(onDismissRequest = { viewModel.rangePickerOpen = false }, confirmButton = { TextButton(onClick = { state.selectedStartDateMillis?.let { viewModel.statisticsStart = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().atStartOfDay(ZoneId.systemDefault()).toInstant().toString() }; state.selectedEndDateMillis?.let { viewModel.statisticsEnd = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().atTime(LocalTime.MAX).atZone(ZoneId.systemDefault()).toInstant().toString() } ?: run { viewModel.statisticsEnd = Instant.now().toString() }; viewModel.rangePickerOpen = false }) { Text(stringResource(R.string.save)) } }) { DateRangePicker(state) } }
 }
 
-@Composable private fun StatisticsCard(meter: MeterEntity, readings: List<ReadingEntity>, tariffs: List<TariffEntity>, start: String?, end: String?) {
-    val summary = consumptionForRange(readings, start, end)
-    val cost = readings.sortedBy { it.recordedAt }.zipWithNext().filter { (_, later) -> (start == null || later.recordedAt >= start) && (end == null || later.recordedAt <= end) }.sumOf { (early, later) ->
-        val delta = later.valueDecimal.toBigDecimal().subtract(early.valueDecimal.toBigDecimal()); if (delta.signum() < 0) java.math.BigDecimal.ZERO else (tariffs.filter { it.effectiveFrom <= later.recordedAt }.maxByOrNull { it.effectiveFrom }?.priceDecimal?.toBigDecimal() ?: java.math.BigDecimal.ZERO).multiply(delta)
+@Composable private fun StatisticsCard(meter: MeterEntity, readings: List<ReadingEntity>, tariffs: List<TariffEntity>, start: String?, end: String?, onTariffs: () -> Unit) {
+    val summary = statisticsForRange(readings, tariffs, start, end)
+    val consumption = summary.consumption?.let { "${it.stripTrailingZeros().toPlainString()} ${meter.unit}" } ?: "—"
+    val cost = summary.cost?.let(::formatCny) ?: "—"
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(meterLabel(meter), style = MaterialTheme.typography.titleMedium)
+            Text("${stringResource(if (summary.hasIncrease) R.string.partial_consumption else R.string.consumption)}: $consumption")
+            Text("${stringResource(if (summary.cost != null && summary.costEstimated) R.string.estimated_cost else R.string.cost)}: $cost")
+            if (summary.consumption == null && !summary.hasIncrease) Text(stringResource(R.string.insufficient_readings))
+            if (summary.hasIncrease) Text(stringResource(R.string.incomplete_increase), color = MaterialTheme.colorScheme.error)
+            if (!summary.hasTariffs || summary.hasMissingTariff) {
+                Text(stringResource(if (!summary.hasTariffs) R.string.no_tariff else R.string.missing_period_tariff), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = onTariffs) { Text(stringResource(R.string.configure_tariffs)) }
+            }
+            if (summary.cost != null && summary.costEstimated) Text(stringResource(R.string.estimated_cost_hint), style = MaterialTheme.typography.bodySmall)
+        }
     }
-    ElevatedCard(Modifier.fillMaxWidth()) { Column(Modifier.padding(16.dp)) { Text(meterLabel(meter), style = MaterialTheme.typography.titleMedium); Text("${stringResource(R.string.consumption)}: ${summary.consumption} ${meter.unit}"); Text("${stringResource(R.string.cost)}: ${formatCny(cost)}"); if (tariffs.isEmpty()) Text(stringResource(R.string.missing_tariff), color = MaterialTheme.colorScheme.error); if (summary.hasNegativeInterval) Text(stringResource(R.string.needs_review), color = MaterialTheme.colorScheme.error) } }
 }
 
 @Composable
