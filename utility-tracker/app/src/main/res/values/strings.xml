@@ -21,17 +21,15 @@
     <string name="save_token">Save token</string>
     <string name="sync_now">Sync now</string>
     <string name="add_reading">Add reading</string>
-    <string name="reading_value">Meter value</string>
+    <string name="reading_value">Remaining reading</string>
     <string name="note">Note</string>
     <string name="recorded_at">Recorded at</string>
-    <string name="low_reading">This reading is lower than the latest reading. Save anyway?</string>
     <string name="confirm">Confirm</string>
     <string name="pending_changes">Pending changes: %1$d</string>
     <string name="no_records">No readings yet</string>
     <string name="range">Date range</string>
     <string name="consumption">Consumption</string>
     <string name="cost">Cost</string>
-    <string name="needs_review">Needs review</string>
     <string name="orientation_navigation">Main navigation</string>
     <string name="pull_to_sync">Pull down to sync</string>
     <string name="no_reading">No reading</string>
@@ -47,7 +45,6 @@
     <string name="next">Next</string>
     <string name="all_time">All time</string>
     <string name="today">Today</string>
-    <string name="missing_tariff">No tariff is effective for this meter.</string>
     <string name="tariff_history">Tariff history</string>
     <string name="conflicts">Conflicts</string>
     <string name="export_csv">Export CSV</string>
@@ -91,4 +88,16 @@
     <string name="no_active_endpoint">No active endpoint</string>
     <string name="no_token_configured">No token configured</string>
     <string name="network_retry_detail">Network connection failed. Retry when connected.</string>
+    <string name="remaining_increased">Remaining reading increased</string>
+    <string name="increase_confirmation">A neighbouring reading forms an increase in the remaining balance. This may be a top-up or an input error. That interval cannot be calculated without top-up records. Save anyway?</string>
+    <string name="reading_meter_required">Select a meter. New readings default to electricity when it is available.</string>
+    <string name="partial_consumption">Known consumption (incomplete)</string>
+    <string name="estimated_cost">Estimated cost</string>
+    <string name="insufficient_readings">Not enough readings to calculate consumption in this range.</string>
+    <string name="incomplete_increase">Remaining readings increased, possibly due to a top-up or an input error. These intervals are excluded; consumption is incomplete and total cost is unavailable.</string>
+    <string name="no_tariff">No tariff configured for this meter.</string>
+    <string name="missing_period_tariff">A tariff does not cover the full reading interval. Cost is unavailable.</string>
+    <string name="configure_tariffs">Set tariffs</string>
+    <string name="estimated_cost_hint">A tariff changed between readings. Cost is estimated using the tariff effective on the later reading date.</string>
+    <string name="interval_attribution">Each interval is assigned to its later reading date. Consumption = previous remaining reading − current remaining reading.</string>
 </resources>

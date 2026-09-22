@@ -62,7 +62,7 @@ fun UtilityTrackerApp(appViewModel: AppViewModel = hiltViewModel()) {
             composable("main") { when (destination) {
                 Destination.HOME -> HomeScreen(appViewModel)
                 Destination.RECORDS -> RecordsScreen(appViewModel)
-                Destination.STATISTICS -> StatisticsScreen(appViewModel)
+                Destination.STATISTICS -> StatisticsScreen(appViewModel, onTariffs = { navController.navigate("tariffs") })
                 Destination.SETTINGS -> SettingsScreen(appViewModel, onEndpoints = { navController.navigate("endpoints") }, onTariffs = { navController.navigate("tariffs") }, onConflicts = { navController.navigate("conflicts") }, onExport = { navController.navigate("export") })
             } }
             composable("endpoints") { EndpointScreen(onBack = { navController.popBackStack() }) }

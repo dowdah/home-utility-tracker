@@ -1,6 +1,6 @@
 # Utility Tracker Android
 
-Utility Tracker is the offline-first Android client for the Home Utility Tracker system. It records cumulative electricity, cold-water, and hot-water readings locally, then synchronizes them with `utility-sync` when a configured endpoint is reachable.
+Utility Tracker is the offline-first Android client for the Home Utility Tracker system. It records remaining electricity, cold-water, and hot-water readings locally, then synchronizes them with `utility-sync` when a configured endpoint is reachable.
 
 ## V1 capabilities
 
@@ -12,6 +12,14 @@ Utility Tracker is the offline-first Android client for the Home Utility Tracker
 - Per-installation API token encrypted with an Android Keystore AES-GCM key. Tokens are not stored in Room or logged.
 - A single named, network-constrained WorkManager chain. It uses Hilt's worker factory, appends a follow-up pass for mutations created during a running sync, and is re-enqueued at application start after a force-stop.
 - Pull-to-refresh on Home and Records; picker-based reading/tariff timestamps; record and tariff edit/tombstone flows; conflict resolution; and Storage Access Framework CSV export.
+
+## Remaining readings and statistics
+
+All meters record remaining balances. Consumption is the previous remaining reading minus the next reading, grouped by meter and attributed to the later reading date. New readings default to the active electricity meter; editing and restored drafts retain their selected meter.
+
+A decrease is normal. An increase may indicate a top-up or an input error: that interval is excluded, known consumption is labeled incomplete, and total cost is unavailable. Top-up amounts cannot be inferred from two balances, including decreases that conceal a top-up; full top-up accounting is outside this version.
+
+No usable interval displays an unknown value, not zero. Missing or incomplete tariff coverage also displays an unknown cost with a link to tariff settings. Pricing requires a tariff at the first reading and uses the rate effective at the later reading, following the existing end-of-interval convention. Rate changes between those readings are explicitly labeled estimates; zero is shown only for a calculable zero. Existing records, IDs, sync payloads and database schema are unchanged.
 
 ## Endpoint security
 
