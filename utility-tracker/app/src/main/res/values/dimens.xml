@@ -1,0 +1,5 @@
+<resources>
+    <dimen name="screen_padding">16dp</dimen>
+    <dimen name="card_spacing">12dp</dimen>
+    <integer name="dashboard_columns">1</integer>
+</resources>
