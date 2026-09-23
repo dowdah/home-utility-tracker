@@ -31,6 +31,8 @@ jobs:
           distribution: temurin
           java-version: '24'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
       - run: ./gradlew :app:testAcceptanceUnitTest :app:assembleDebug :app:assembleAcceptanceAndroidTest
       - uses: actions/upload-artifact@v4
         with:
