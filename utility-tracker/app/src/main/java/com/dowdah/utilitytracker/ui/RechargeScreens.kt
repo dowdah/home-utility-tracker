@@ -1,6 +1,9 @@
 package com.dowdah.utilitytracker.ui
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,8 +17,13 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -27,6 +35,9 @@ import java.time.*
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.roundToInt
 import kotlinx.serialization.json.*
 
 @Composable
@@ -177,14 +188,16 @@ fun StatisticsScreen(viewModel: AppViewModel, onTariffs: () -> Unit) {
                         TextButton(onTariffs) { Text(stringResource(R.string.configure_tariffs)) }
                     }
                     if (summary.costEstimated) Text(stringResource(R.string.estimated_cost_hint))
-                    val periods = if (mode == "year") (1..12).map { month ->
-                        val date = LocalDate.of(anchor.year, month, 1)
-                        TrendPeriod(date.format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault())), statisticsForRange(rows, rates, date.atStartOfDay(zone).toInstant().toString(), date.plusMonths(1).atStartOfDay(zone).toInstant().minusNanos(1).toString(), credits))
-                    } else rows.sortedBy { Instant.parse(it.recordedAt) }.zipWithNext().filter { (_, current) ->
-                        val time = Instant.parse(current.recordedAt)
-                        (start == null || time >= Instant.parse(start)) && (end == null || time <= Instant.parse(end))
-                    }.map { (previous, current) -> TrendPeriod(previous.recordedAt.localDisplay() + " – " + current.recordedAt.localDisplay(), statisticsForRange(listOf(previous, current), rates, current.recordedAt, current.recordedAt, credits)) }
-                    ConsumptionTrend(periods, meter.unit)
+                    if (mode == "year") {
+                        val periods = (1..12).map { month ->
+                            val date = LocalDate.of(anchor.year, month, 1)
+                            TrendPeriod(date.format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault())), statisticsForRange(rows, rates, date.atStartOfDay(zone).toInstant().toString(), date.plusMonths(1).atStartOfDay(zone).toInstant().minusNanos(1).toString(), credits))
+                        }
+                        ConsumptionTrend(periods, meter.unit)
+                    } else {
+                        IntervalAverageTrend(intervalTrendForRange(rows, rates, start, end, credits), meter.unit)
+                    }
+                    DailyRemainingTrend(dailyRemainingForRange(meter.id, rows, credits, start, end, zone), meter.unit)
                 }
             }
         }
@@ -202,10 +215,246 @@ fun StatisticsScreen(viewModel: AppViewModel, onTariffs: () -> Unit) {
 }
 
 @Composable
+internal fun DailyRemainingTrend(points: List<DailyRemainingPoint>, unit: String) {
+    Text(stringResource(R.string.daily_remaining_title, unit), style = MaterialTheme.typography.titleSmall)
+    Text(stringResource(R.string.daily_remaining_hint), style = MaterialTheme.typography.bodySmall)
+    if (points.none { it.value != null }) {
+        Text(stringResource(R.string.daily_remaining_empty), style = MaterialTheme.typography.bodySmall)
+        return
+    }
+
+    var selectedIndex by remember(points) { mutableIntStateOf(points.indexOfLast { it.value != null }) }
+    var showValues by remember(points) { mutableStateOf(false) }
+    val maxValue = points.mapNotNull { it.value }.maxOrNull()?.takeIf { it.signum() > 0 } ?: BigDecimal.ONE
+    val primary = MaterialTheme.colorScheme.primary
+    val selectedColor = MaterialTheme.colorScheme.tertiary
+    val markerColor = MaterialTheme.colorScheme.secondary
+    val axisColor = MaterialTheme.colorScheme.outline
+    val description = stringResource(R.string.daily_remaining_chart_description)
+    val dateFormat = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(Locale.getDefault())
+    val span = (points.size - 1).coerceAtLeast(1)
+    fun position(index: Int): Float = if (points.size == 1) .5f else index.toFloat() / span
+
+    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        Text("● " + stringResource(R.string.daily_remaining_actual), style = MaterialTheme.typography.labelSmall)
+        Text("○ " + stringResource(R.string.daily_remaining_estimated), style = MaterialTheme.typography.labelSmall)
+        Text("◆ " + stringResource(R.string.daily_remaining_recharge), style = MaterialTheme.typography.labelSmall)
+    }
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val plotWidth = maxOf(maxWidth, minOf(2400.dp, 10.dp * points.size))
+        Column(Modifier.horizontalScroll(rememberScrollState())) {
+            Text("${formatTrendNumber(maxValue)} $unit", style = MaterialTheme.typography.labelSmall)
+            Canvas(Modifier.width(plotWidth).height(144.dp).semantics { contentDescription = description; testTag = "daily_remaining_chart" }.pointerInput(points, plotWidth) {
+                detectTapGestures { tap ->
+                    val inset = 6.dp.toPx()
+                    val fraction = ((tap.x - inset) / (size.width - 2 * inset)).coerceIn(0f, 1f)
+                    selectedIndex = (fraction * span).roundToInt().coerceIn(points.indices)
+                }
+            }) {
+                val top = 8.dp.toPx()
+                val bottom = size.height - 8.dp.toPx()
+                val inset = 6.dp.toPx()
+                drawLine(axisColor.copy(alpha = .35f), Offset(0f, bottom), Offset(size.width, bottom), 1.dp.toPx())
+                drawLine(axisColor.copy(alpha = .2f), Offset(0f, (top + bottom) / 2f), Offset(size.width, (top + bottom) / 2f), 1.dp.toPx())
+                fun x(index: Int): Float = inset + position(index) * (size.width - 2 * inset)
+                fun pointOffset(index: Int, value: BigDecimal) = Offset(x(index),
+                    bottom - value.divide(maxValue, 12, RoundingMode.HALF_EVEN).toFloat().coerceIn(0f, 1f) * (bottom - top))
+                points.forEachIndexed { index, point ->
+                    val previous = points.getOrNull(index - 1)
+                    if (previous?.value != null && point.value != null && !point.breakBefore &&
+                        previous.rechargeCount == 0 && point.rechargeCount == 0) {
+                        drawLine(primary, pointOffset(index - 1, previous.value), pointOffset(index, point.value), 2.dp.toPx())
+                    }
+                }
+                points.forEachIndexed { index, point ->
+                    val x = x(index)
+                    if (point.rechargeCount > 0) {
+                        val side = 3.dp.toPx()
+                        val centerY = bottom + 4.dp.toPx()
+                        drawPath(Path().apply {
+                            moveTo(x, centerY - side)
+                            lineTo(x + side, centerY)
+                            lineTo(x, centerY + side)
+                            lineTo(x - side, centerY)
+                            close()
+                        }, markerColor)
+                    }
+                    val value = point.value ?: return@forEachIndexed
+                    val offset = pointOffset(index, value)
+                    val color = if (index == selectedIndex) selectedColor else primary
+                    if (point.source == RemainingSource.ACTUAL) drawCircle(color, 4.dp.toPx(), offset)
+                    else if (size.width / span >= 10.dp.toPx() || index == selectedIndex)
+                        drawCircle(color, 4.dp.toPx(), offset, style = Stroke(2.dp.toPx()))
+                }
+            }
+            Row(Modifier.width(plotWidth), horizontalArrangement = Arrangement.SpaceBetween) {
+                Text(points.first().date.format(dateFormat), style = MaterialTheme.typography.labelSmall)
+                Text(points.last().date.format(dateFormat), style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+
+    points.getOrNull(selectedIndex)?.let { point ->
+        Surface(tonalElevation = 2.dp, shape = MaterialTheme.shapes.medium,
+            modifier = Modifier.fillMaxWidth().semantics { testTag = "daily_remaining_detail" }) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(point.date.format(dateFormat), style = MaterialTheme.typography.titleSmall)
+                Text(dailyRemainingValue(point, unit))
+                when (point.source) {
+                    RemainingSource.ACTUAL -> Text(stringResource(R.string.daily_remaining_observed_at,
+                        point.recordedAt?.toString()?.localDisplay() ?: "—"))
+                    RemainingSource.ESTIMATED -> Text(stringResource(R.string.daily_remaining_estimated_end))
+                    RemainingSource.UNAVAILABLE -> Text(stringResource(when (point.gap) {
+                        RemainingGap.UNKNOWN_CONSUMPTION -> R.string.daily_remaining_unknown_interval
+                        RemainingGap.ZERO_DURATION -> R.string.daily_remaining_zero_duration
+                        RemainingGap.NEGATIVE_ESTIMATE -> R.string.daily_remaining_negative_estimate
+                        else -> R.string.daily_remaining_no_bounds
+                    }))
+                }
+                if (point.rechargeCount > 0) Text(stringResource(R.string.daily_remaining_recharge_detail,
+                    point.rechargeCount, point.rechargeQuantity.stripTrailingZeros().toPlainString(), unit))
+            }
+        }
+    }
+    TextButton({ showValues = !showValues }) {
+        Text(stringResource(if (showValues) R.string.daily_remaining_hide_values else R.string.daily_remaining_show_values))
+    }
+    if (showValues) {
+        LazyColumn(Modifier.fillMaxWidth().height(240.dp).semantics { testTag = "daily_remaining_values" }) {
+            items(points.size) { index ->
+                val point = points[index]
+                Row(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp)
+                    .semantics { selected = index == selectedIndex; testTag = "daily_remaining_item_$index" }
+                    .clickable { selectedIndex = index }.padding(vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(point.date.format(dateFormat), style = MaterialTheme.typography.bodySmall)
+                    Text(dailyRemainingValue(point, unit), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun dailyRemainingValue(point: DailyRemainingPoint, unit: String): String {
+    val value = point.value ?: return stringResource(R.string.daily_remaining_unavailable)
+    val number = if (point.source == RemainingSource.ACTUAL) value.stripTrailingZeros().toPlainString()
+        else "≈${formatTrendNumber(value)}"
+    val source = stringResource(if (point.source == RemainingSource.ACTUAL) R.string.daily_remaining_actual else R.string.daily_remaining_estimated)
+    return "$source: $number $unit"
+}
+
+@Composable
+internal fun IntervalAverageTrend(periods: List<IntervalTrendPoint>, unit: String) {
+    Text(stringResource(R.string.interval_average_title, unit), style = MaterialTheme.typography.titleSmall)
+    Text(stringResource(R.string.interval_average_hint), style = MaterialTheme.typography.bodySmall)
+    if (periods.isEmpty()) {
+        Text(stringResource(R.string.interval_average_empty), style = MaterialTheme.typography.bodySmall)
+        return
+    }
+
+    var selectedIndex by remember(periods) { mutableIntStateOf(-1) }
+    val axisStart = periods.minOf { it.end }
+    val axisEnd = periods.maxOf { it.end }
+    val axisMillis = max(1L, java.time.Duration.between(axisStart, axisEnd).toMillis())
+    val maxAverage = periods.mapNotNull { it.averagePerDay }.maxOrNull()?.takeIf { it.signum() > 0 } ?: BigDecimal.ONE
+    val primary = MaterialTheme.colorScheme.primary
+    val selectedColor = MaterialTheme.colorScheme.tertiary
+    val axisColor = MaterialTheme.colorScheme.outline
+    val chartDescription = stringResource(R.string.interval_average_chart_description)
+    fun position(instant: Instant): Float = if (axisStart == axisEnd) .5f else
+        (java.time.Duration.between(axisStart, instant).toMillis().toFloat() / axisMillis.toFloat()).coerceIn(0f, 1f)
+
+    BoxWithConstraints(Modifier.fillMaxWidth()) {
+        val plotWidth = maxOf(maxWidth, 56.dp * periods.size)
+        Column(Modifier.horizontalScroll(rememberScrollState())) {
+            Text("${formatTrendNumber(maxAverage)} $unit/" + stringResource(R.string.day_unit), style = MaterialTheme.typography.labelSmall)
+            Canvas(Modifier.width(plotWidth).height(128.dp).semantics { contentDescription = chartDescription; testTag = "interval_average_chart" }.pointerInput(periods, plotWidth) {
+                detectTapGestures { tap ->
+                    val inset = 6.dp.toPx()
+                    val fraction = ((tap.x - inset) / (size.width - 2 * inset)).coerceIn(0f, 1f)
+                    selectedIndex = periods.indices.minByOrNull { abs(position(periods[it].end) - fraction) } ?: -1
+                }
+            }) {
+                val top = 8.dp.toPx()
+                val bottom = size.height - 8.dp.toPx()
+                val inset = 6.dp.toPx()
+                fun x(instant: Instant): Float = inset + position(instant) * (size.width - 2 * inset)
+                drawLine(axisColor.copy(alpha = .35f), Offset(0f, bottom), Offset(size.width, bottom), 1.dp.toPx())
+                drawLine(axisColor.copy(alpha = .2f), Offset(0f, (top + bottom) / 2f), Offset(size.width, (top + bottom) / 2f), 1.dp.toPx())
+                fun y(value: BigDecimal): Float = bottom - value.divide(maxAverage, 12, RoundingMode.HALF_EVEN).toFloat().coerceIn(0f, 1f) * (bottom - top)
+                periods.zipWithNext().forEach { (previous, current) ->
+                    if (previous.averagePerDay != null && current.averagePerDay != null) {
+                        drawLine(primary, Offset(x(previous.end), y(previous.averagePerDay)),
+                            Offset(x(current.end), y(current.averagePerDay)), 2.dp.toPx())
+                    }
+                }
+                periods.forEachIndexed { index, period ->
+                    val average = period.averagePerDay ?: return@forEachIndexed
+                    val color = if (index == selectedIndex) selectedColor else primary
+                    drawCircle(color, if (index == selectedIndex) 5.dp.toPx() else 4.dp.toPx(),
+                        Offset(x(period.end), y(average)))
+                }
+            }
+            Row(Modifier.width(plotWidth), horizontalArrangement = Arrangement.SpaceBetween) {
+                val dateFormat = DateTimeFormatter.ofLocalizedDate(FormatStyle.SHORT).withLocale(Locale.getDefault())
+                Text(axisStart.atZone(ZoneId.systemDefault()).format(dateFormat), style = MaterialTheme.typography.labelSmall)
+                Text(axisEnd.atZone(ZoneId.systemDefault()).format(dateFormat), style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+
+    periods.forEachIndexed { index, period ->
+        val reason = when {
+            period.hasZeroDuration -> stringResource(R.string.interval_zero_duration)
+            period.statistics.hasIncrease -> stringResource(R.string.interval_unknown_increase)
+            else -> null
+        }
+        val value = period.averagePerDay?.let { "${formatTrendNumber(it)} $unit/" + stringResource(R.string.day_unit) } ?: reason ?: "—"
+        Column(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp).semantics { selected = index == selectedIndex; testTag = "interval_item_$index" }.clickable { selectedIndex = index }.padding(vertical = 8.dp)) {
+            Text("${period.start.toString().localDisplay()} – ${period.end.toString().localDisplay()}", style = MaterialTheme.typography.bodySmall)
+            Text(value, style = MaterialTheme.typography.bodyMedium, color = if (index == selectedIndex) selectedColor else MaterialTheme.colorScheme.onSurface)
+        }
+    }
+    periods.getOrNull(selectedIndex)?.let { period ->
+        Surface(tonalElevation = 2.dp, shape = MaterialTheme.shapes.medium, modifier = Modifier.fillMaxWidth().semantics { testTag = "interval_detail" }) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(stringResource(R.string.interval_detail), style = MaterialTheme.typography.titleSmall)
+                Text("${period.start.toString().localDisplay()} – ${period.end.toString().localDisplay()}")
+                Text(intervalDurationLabel(period))
+                val total = period.statistics.consumption?.let { "${it.stripTrailingZeros().toPlainString()} $unit" }
+                    ?: stringResource(if (period.hasZeroDuration) R.string.interval_zero_duration else R.string.interval_unknown_increase)
+                Text(stringResource(R.string.interval_total, total))
+                Text(stringResource(R.string.interval_average_value, period.averagePerDay?.let { "${formatTrendNumber(it)} $unit/" + stringResource(R.string.day_unit) } ?: "—"))
+            }
+        }
+    }
+}
+
+private fun formatTrendNumber(value: BigDecimal): String {
+    if (value.signum() == 0) return "0"
+    val precision = if (value.abs() < BigDecimal("0.001")) 6 else 3
+    val rounded = value.setScale(precision, RoundingMode.HALF_EVEN)
+    return if (rounded.signum() == 0) "<0.000001" else rounded.stripTrailingZeros().toPlainString()
+}
+
+@Composable
+private fun intervalDurationLabel(period: IntervalTrendPoint): String {
+    val duration = java.time.Duration.between(period.start, period.end)
+    val minutes = duration.toMinutes()
+    return when {
+        minutes >= 2880 -> stringResource(R.string.interval_duration_days, period.elapsedDays?.let(::formatTrendNumber) ?: "—")
+        minutes >= 60 -> stringResource(R.string.interval_duration_hours, BigDecimal.valueOf(minutes).divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_EVEN).stripTrailingZeros().toPlainString())
+        minutes > 0 || duration.isZero -> stringResource(R.string.interval_duration_minutes, minutes)
+        else -> stringResource(R.string.interval_duration_seconds, BigDecimal.valueOf(duration.seconds).add(BigDecimal.valueOf(duration.nano.toLong()).movePointLeft(9)).setScale(2, RoundingMode.HALF_EVEN).stripTrailingZeros().toPlainString())
+    }
+}
+
+@Composable
 private fun ConsumptionTrend(periods: List<TrendPeriod>, unit: String) {
     if (periods.isEmpty()) return
-    Text(stringResource(R.string.trend), style = MaterialTheme.typography.titleSmall)
-    Text(stringResource(R.string.interval_trend), style = MaterialTheme.typography.bodySmall)
+    Text(stringResource(R.string.yearly_trend_title), style = MaterialTheme.typography.titleSmall)
+    Text(stringResource(R.string.yearly_trend_hint), style = MaterialTheme.typography.bodySmall)
     val max = periods.mapNotNull { it.stats.consumption }.maxOrNull()?.takeIf { it.signum() > 0 } ?: BigDecimal.ONE
     val color = MaterialTheme.colorScheme.primary
     // Float is used only for drawing geometry; all calculations above remain Decimal.

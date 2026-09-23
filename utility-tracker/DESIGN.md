@@ -29,6 +29,6 @@ Utility Tracker is a private, local-first household meter log. Its primary job i
 
 The approved expansion keeps the existing Material 3 theme, typography and spacing. `ui/theme/Theme.kt` remains the runtime color/type owner; `values-land/dimens.xml` owns orientation layout. Recharges reuse the existing meter selector, date/time picker, confirmation and overflow controls. Do not add a second form/navigation system.
 
-Consumption and recharge spending are separate labeled values. Month charts describe reading intervals, year charts describe month buckets, and every chart has matching text values. Unknown values are gaps rather than zero bars; partial totals retain their warning. All new content has English and Chinese resources.
+Consumption and recharge spending are separate labeled values. Month and custom consumption charts place complete interval averages at the later reading date and connect known points as a trend; the line is not measured daily use. Year consumption uses bars for month buckets. Every meter also has a daily remaining chart: the day's last reading is measured, while other days are marked estimates between bounding readings; gaps and recharge markers stay visible. Both charts have selectable text details. Unknown values are gaps rather than zero lines; partial totals retain their warning. All new content has English and Chinese resources.
 
 Behavior drift addressed: save failures now preserve the form; the dashboard reads persisted background-sync state instead of only transient messages. No palette or theme change is intended.

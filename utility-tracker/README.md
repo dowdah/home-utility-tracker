@@ -18,7 +18,7 @@ Consumption and its cost follow the later reading date. Pricing requires tariff 
 - Portrait bottom navigation and landscape rail. Drafts, filters and selected periods survive configuration changes.
 - Home shows actual latest readings, age, monthly consumption/cost/spending, pending changes, conflicts and last successful synchronization.
 - Records offers readings/recharges and per-meter filters. Forms use the shared meter selector and Material date/time pickers; errors preserve entered values.
-- Statistics offers month, year and custom ranges. Month/custom charts use actual reading intervals; yearly charts use monthly buckets. Text values accompany the chart. Unknown intervals are never presented as zero daily consumption.
+- Statistics offers month, year and custom ranges. Month/custom consumption charts connect each interval's average per elapsed 24-hour day at its later reading date; the line is a trend, not actual daily use. Yearly consumption uses monthly bars. Each meter also shows daily remaining quantities: the last reading on a reading day is measured, and unmeasured days are labeled linear day-end estimates only between two readings, accounting for recorded recharge times. No balance is projected beyond the latest reading. Text details accompany both charts; unknown values remain gaps.
 - Settings manages tariff history, conflicts, backend endpoints and SAF exports of readings, recharges or tariffs.
 
 ## Synchronization and data protection
