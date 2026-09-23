@@ -49,6 +49,20 @@ data class TariffEntity(
     val serverRevision: Long,
 )
 
+@Entity(tableName = "recharges")
+data class RechargeEntity(
+    @PrimaryKey val id: String,
+    val meterId: String,
+    val amountDecimal: String,
+    val unitPriceDecimal: String,
+    val quantityDecimal: String,
+    val currency: String,
+    val creditedAt: String,
+    val note: String?,
+    val deleted: Boolean,
+    val serverRevision: Long,
+)
+
 @Entity(tableName = "outbox")
 data class OutboxEntity(
     @PrimaryKey val operationId: String = UUID.randomUUID().toString(),
@@ -58,6 +72,9 @@ data class OutboxEntity(
     val baseRevision: Long,
     val payloadJson: String,
     val createdAt: String,
+    val previousOperationId: String? = null,
+    val groupId: String? = null,
+    val groupSize: Int? = null,
     val attemptCount: Int = 0,
     val lastError: String? = null,
 )
@@ -69,6 +86,7 @@ data class ConflictEntity(
     val entityId: String,
     val localPayloadJson: String,
     val serverEntityJson: String?,
+    val groupId: String? = null,
     val createdAt: String,
 )
 
@@ -78,5 +96,6 @@ data class SyncStateEntity(
     val backendInstanceId: String? = null,
     val cursorRevision: Long = 0,
     val lastSuccessAt: Long? = null,
+    val serverStatusJson: String? = null,
     val lastError: String? = null,
 )

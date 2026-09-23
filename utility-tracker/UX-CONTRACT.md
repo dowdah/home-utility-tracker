@@ -24,3 +24,16 @@ Business source: the owner confirmed all meters record remaining quantities and 
 | Tariff recovery | Existing tariff-history route | Both absent and insufficient tariff coverage provide a settings action; Back returns to statistics with its range intact. | Device navigation check |
 
 No existing reading is rewritten. Recharge-aware accounting remains a separate feature: observed increases are uncalculable intervals, and a top-up hidden within an overall decrease cannot be detected from balances alone.
+
+## Recharge ledger and synchronization protocol 2
+
+| Capability | Canonical owner | Contract | Verification |
+| --- | --- | --- | --- |
+| Recharge form | `RechargeEditor`, shared `MeterChooser` and `DateTimeField` | Save amount, purchase-price snapshot and scale-12 HALF_EVEN quantity; optional electricity post-credit reading is one atomic group. Retain draft on validation failure. | RechargeFormTest, live two-device acceptance |
+| Recharge calculation | `statisticsForRange` | Previous balance + credits in `(previous, current]` - current balance. Spending follows credit date separately. Never infer missing credits or current balances. | RechargeStatisticsTest |
+| Statistics | `StatisticsScreen`, `SummaryValues`, `ConsumptionTrend` | Month uses actual reading intervals; year uses monthly buckets. Each meter retains its own unit; textual values mirror the chart. | Unit tests and device inspection |
+| Sync recovery | `BackendRepository` | One mutex for manual/worker sync; immutable sent operations, per-entity successors, complete atomic groups, visible replayed conflicts. | LedgerRepositoryTest |
+| Data upgrade | `MIGRATION_1_2` | Preserve readings, outbox, conflicts, cursor and endpoint identity; never destructively recreate Room. | DatabaseMigrationTest |
+| Operational status | `PersistentSyncSummary` | Persist success/error/status, show alert freshness and unresolved conflicts. Old cached status does not imply current health. | Live status acceptance |
+
+Default date/time controls remain Material pickers. Form quantities and monetary values use Decimal; Float is permitted only for chart geometry. New recharge records default to electricity; water recharge does not fabricate a reading. Editing or deleting a recharge never deletes its linked real reading.

@@ -16,5 +16,5 @@ object AppModule {
     @Provides @Singleton
     fun database(@ApplicationContext context: Context): UtilityDatabase = Room.databaseBuilder(
         context, UtilityDatabase::class.java, "utility-tracker.db",
-    ).fallbackToDestructiveMigration().build()
+    ).addMigrations(com.dowdah.utilitytracker.data.MIGRATION_1_2).build()
 }

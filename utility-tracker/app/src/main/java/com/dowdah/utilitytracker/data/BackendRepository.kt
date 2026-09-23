@@ -13,6 +13,11 @@ import java.time.Instant
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.serialization.json.Json
@@ -49,10 +54,12 @@ class BackendRepository @Inject constructor(
     private val database: UtilityDatabase,
     private val secretStore: SecretStore,
 ) {
-    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
+    private val syncMutex = Mutex()
     val endpoints: Flow<List<EndpointEntity>> = database.endpointDao().observeAll()
     val meters: Flow<List<MeterEntity>> = database.meterDao().observeActive()
     val readings: Flow<List<ReadingEntity>> = database.readingDao().observeActive()
+    val recharges: Flow<List<RechargeEntity>> = database.rechargeDao().observeActive()
     val tariffs: Flow<List<TariffEntity>> = database.tariffDao().observeActive()
     val conflicts: Flow<List<ConflictEntity>> = database.conflictDao().observeAll()
     val syncState: Flow<SyncStateEntity?> = database.syncStateDao().observe()
@@ -112,132 +119,229 @@ class BackendRepository @Inject constructor(
     fun saveToken(token: String) = secretStore.saveToken(token.trim())
     fun clearToken() = secretStore.clearToken()
 
-    suspend fun saveReading(id: String? = null, meterId: String, value: String, recordedAt: String, note: String?) {
+    private suspend fun enqueue(type: String, id: String, kind: String, revision: Long, payload: JsonObject,
+                                groupId: String? = null, groupSize: Int? = null) {
+        val conflict = database.conflictDao().forEntity(type, id)
+        if (conflict != null) {
+            database.conflictDao().upsert(conflict.copy(localPayloadJson = payload.toString()))
+            return
+        }
+        val previous = database.outboxDao().forEntity(type, id).lastOrNull()
+        database.outboxDao().upsert(OutboxEntity(entityType = type, entityId = id, kind = kind,
+            baseRevision = revision, payloadJson = payload.toString(), createdAt = Instant.now().toString(),
+            previousOperationId = previous?.operationId, groupId = groupId, groupSize = groupSize))
+    }
+
+    private fun validateInput(meterId: String, timestamp: String, note: String? = null) {
+        require(meterId.isNotBlank()) { "Select a meter" }
+        Instant.parse(timestamp)
+        require((note?.length ?: 0) <= 1000) { "Note must be at most 1000 characters" }
+    }
+
+    suspend fun saveReading(id: String? = null, meterId: String, value: String, recordedAt: String, note: String?) = database.withTransaction {
+        validateInput(meterId, recordedAt, note)
         val normalized = canonicalDecimal(value)
         val existing = id?.let { database.readingDao().byId(it) }
         val entityId = existing?.id ?: UUID.randomUUID().toString()
-        val payload = readingPayload(meterId, normalized, recordedAt, note)
-        database.withTransaction {
-            database.readingDao().upsert(ReadingEntity(entityId, meterId, normalized, recordedAt, note, false, existing?.serverRevision ?: 0))
-            database.outboxDao().deleteForEntity("reading", entityId)
-            database.outboxDao().upsert(OutboxEntity(
-                entityType = "reading", entityId = entityId, kind = "upsert", baseRevision = existing?.serverRevision ?: 0,
-                payloadJson = payload.toString(), createdAt = Instant.now().toString(),
-            ))
-        }
+        database.readingDao().upsert(ReadingEntity(entityId, meterId, normalized, recordedAt, note, false, existing?.serverRevision ?: 0))
+        enqueue("reading", entityId, "upsert", existing?.serverRevision ?: 0, readingPayload(meterId, normalized, recordedAt, note))
     }
 
     suspend fun deleteReading(reading: ReadingEntity) = database.withTransaction {
-        database.outboxDao().deleteForEntity("reading", reading.id)
-        if (reading.serverRevision == 0L) database.readingDao().delete(reading.id)
-        else {
-            database.readingDao().upsert(reading.copy(deleted = true))
-            database.outboxDao().upsert(OutboxEntity(entityType = "reading", entityId = reading.id, kind = "tombstone", baseRevision = reading.serverRevision, payloadJson = "{}", createdAt = Instant.now().toString()))
-        }
+        val current = database.readingDao().byId(reading.id) ?: return@withTransaction
+        database.readingDao().upsert(current.copy(deleted = true))
+        enqueue("reading", current.id, "tombstone", current.serverRevision, buildJsonObject {})
     }
 
-    suspend fun saveTariff(id: String? = null, meterId: String, price: String, effectiveFrom: String) {
+    suspend fun saveTariff(id: String? = null, meterId: String, price: String, effectiveFrom: String) = database.withTransaction {
+        validateInput(meterId, effectiveFrom)
         val normalized = canonicalDecimal(price)
         val existing = id?.let { database.tariffDao().byId(it) }
         val entityId = existing?.id ?: UUID.randomUUID().toString()
         val payload = buildJsonObject {
             put("meter_id", meterId); put("price_decimal", normalized); put("currency", "CNY"); put("effective_from", effectiveFrom)
         }
-        database.withTransaction {
-            database.tariffDao().upsert(TariffEntity(entityId, meterId, normalized, "CNY", effectiveFrom, false, existing?.serverRevision ?: 0))
-            database.outboxDao().deleteForEntity("tariff", entityId)
-            database.outboxDao().upsert(OutboxEntity(entityType = "tariff", entityId = entityId, kind = "upsert", baseRevision = existing?.serverRevision ?: 0, payloadJson = payload.toString(), createdAt = Instant.now().toString()))
-        }
+        database.tariffDao().upsert(TariffEntity(entityId, meterId, normalized, "CNY", effectiveFrom, false, existing?.serverRevision ?: 0))
+        enqueue("tariff", entityId, "upsert", existing?.serverRevision ?: 0, payload)
     }
 
     suspend fun deleteTariff(tariff: TariffEntity) = database.withTransaction {
-        database.outboxDao().deleteForEntity("tariff", tariff.id)
-        if (tariff.serverRevision == 0L) database.tariffDao().delete(tariff.id)
-        else {
-            database.tariffDao().upsert(tariff.copy(deleted = true))
-            database.outboxDao().upsert(OutboxEntity(entityType = "tariff", entityId = tariff.id, kind = "tombstone", baseRevision = tariff.serverRevision, payloadJson = "{}", createdAt = Instant.now().toString()))
+        val current = database.tariffDao().byId(tariff.id) ?: return@withTransaction
+        database.tariffDao().upsert(current.copy(deleted = true))
+        enqueue("tariff", current.id, "tombstone", current.serverRevision, buildJsonObject {})
+    }
+
+    suspend fun saveRecharge(id: String? = null, meterId: String, amount: String, price: String,
+                             creditedAt: String, note: String?, remaining: String? = null) = database.withTransaction {
+        validateInput(meterId, creditedAt, note)
+        val quantity = rechargeQuantity(amount, price).toPlainString()
+        val existing = id?.let { database.rechargeDao().byId(it) }
+        val entityId = existing?.id ?: UUID.randomUUID().toString()
+        val group = if (existing == null && !remaining.isNullOrBlank()) UUID.randomUUID().toString() else null
+        if (group != null) require(database.meterDao().active().any { it.id == meterId && it.meterType == "ELECTRICITY" })
+        val payload = buildJsonObject {
+            put("meter_id", meterId); put("amount_decimal", canonicalDecimal(amount)); put("unit_price_decimal", canonicalDecimal(price))
+            put("quantity_decimal", quantity); put("currency", "CNY"); put("credited_at", creditedAt); put("note", note)
+        }
+        applyLocalDraft("recharge", entityId, payload, existing?.serverRevision ?: 0)
+        enqueue("recharge", entityId, "upsert", existing?.serverRevision ?: 0, payload, group, group?.let { 2 })
+        if (group != null) {
+            val readingId = UUID.randomUUID().toString()
+            val reading = readingPayload(meterId, canonicalDecimal(requireNotNull(remaining)), creditedAt, note)
+            applyLocalDraft("reading", readingId, reading, 0)
+            enqueue("reading", readingId, "upsert", 0, reading, group, 2)
         }
     }
 
-    suspend fun keepServerConflict(conflict: ConflictEntity) = database.withTransaction {
-        conflict.serverEntityJson?.let { applyEntity(json.decodeFromString(EntityDto.serializer(), it)) }
-        database.outboxDao().deleteForEntity(conflict.entityType, conflict.entityId)
-        // A later server version supersedes any earlier conflict for the same entity.
-        database.conflictDao().deleteForEntity(conflict.entityType, conflict.entityId)
+    suspend fun deleteRecharge(recharge: RechargeEntity) = database.withTransaction {
+        val current = database.rechargeDao().byId(recharge.id) ?: return@withTransaction
+        database.rechargeDao().upsert(current.copy(deleted = true))
+        enqueue("recharge", current.id, "tombstone", current.serverRevision, buildJsonObject {})
     }
 
-    suspend fun overrideConflict(conflict: ConflictEntity) = database.withTransaction {
-        val server = conflict.serverEntityJson?.let { json.decodeFromString(EntityDto.serializer(), it) }
-            ?: throw IllegalStateException("Conflict has no server version")
-        val kind = if (conflict.localPayloadJson == "{}") "tombstone" else "upsert"
-        val payload = json.parseToJsonElement(conflict.localPayloadJson)
-        if (kind == "upsert") applyLocalDraft(conflict.entityType, conflict.entityId, payload.jsonObject, server.serverRevision ?: 0)
-        else applyEntity(server.copy(deleted = true))
-        database.outboxDao().deleteForEntity(conflict.entityType, conflict.entityId)
-        database.outboxDao().upsert(OutboxEntity(entityType = conflict.entityType, entityId = conflict.entityId, kind = kind, baseRevision = server.serverRevision ?: 0, payloadJson = conflict.localPayloadJson, createdAt = Instant.now().toString()))
-        database.conflictDao().deleteForEntity(conflict.entityType, conflict.entityId)
+    private suspend fun conflictGroup(conflict: ConflictEntity) = database.conflictDao().all().filter {
+        if (conflict.groupId == null) it.operationId == conflict.operationId else it.groupId == conflict.groupId
     }
 
-    suspend fun sync(): SyncResult = try {
+    suspend fun keepServerConflict(conflict: ConflictEntity) = syncMutex.withLock {
+        database.withTransaction {
+            conflictGroup(conflict).forEach { item ->
+                database.outboxDao().deleteForEntity(item.entityType, item.entityId)
+                database.conflictDao().deleteForEntity(item.entityType, item.entityId)
+                val server = item.serverEntityJson?.let { json.decodeFromString(EntityDto.serializer(), it) }
+                if (server != null) applyEntity(server, force = true) else removeLocal(item.entityType, item.entityId)
+            }
+        }
+    }
+
+    suspend fun overrideConflict(conflict: ConflictEntity) = syncMutex.withLock {
+        database.withTransaction {
+            val members = conflictGroup(conflict)
+            val actionable = members.filter { it.localPayloadJson != "{}" || it.serverEntityJson != null }
+            val group = if (actionable.size > 1) UUID.randomUUID().toString() else null
+            members.forEach { item ->
+                val server = item.serverEntityJson?.let { json.decodeFromString(EntityDto.serializer(), it) }
+                val revision = server?.serverRevision ?: 0
+                val kind = if (item.localPayloadJson == "{}") "tombstone" else "upsert"
+                database.outboxDao().deleteForEntity(item.entityType, item.entityId)
+                database.conflictDao().deleteForEntity(item.entityType, item.entityId)
+                if (item in actionable) {
+                    val payload = json.parseToJsonElement(item.localPayloadJson).jsonObject
+                    if (kind == "upsert") applyLocalDraft(item.entityType, item.entityId, payload, revision)
+                    else applyEntity(requireNotNull(server).copy(deleted = true), force = true)
+                    enqueue(item.entityType, item.entityId, kind, revision, payload, group, group?.let { actionable.size })
+                } else removeLocal(item.entityType, item.entityId)
+            }
+        }
+    }
+
+    private suspend fun removeLocal(type: String, id: String) {
+        when (type) {
+            "reading" -> database.readingDao().delete(id)
+            "tariff" -> database.tariffDao().delete(id)
+            "recharge" -> database.rechargeDao().delete(id)
+        }
+    }
+
+    /** Take complete groups and only the ready head of each entity queue. */
+    private suspend fun readyOperations(): List<OutboxEntity> {
+        val all = database.outboxDao().all()
+        val ready = all.filter { it.previousOperationId == null }
+        val selected = mutableListOf<OutboxEntity>()
+        ready.forEach { head ->
+            if (selected.none { it.operationId == head.operationId }) {
+                val group = if (head.groupId == null) listOf(head) else all.filter { it.groupId == head.groupId }
+                if (group.all { it.previousOperationId == null } && group.size == (head.groupSize ?: 1) && selected.size + group.size <= 100) selected.addAll(group)
+            }
+        }
+        return selected
+    }
+
+    suspend fun sync(): SyncResult = syncMutex.withLock { syncLocked() }
+
+    private suspend fun syncLocked(): SyncResult { return try {
         val endpoint = database.endpointDao().active() ?: return syncActionRequired("No active endpoint")
         val token = secretStore.token() ?: return syncActionRequired("No token configured")
         val api = client(endpoint.baseUrl, token)
         val meta = api.meta()
+        if (meta.syncProtocolVersion < 2 || meta.minSyncProtocolVersion > 2) return syncActionRequired("Server or app upgrade required")
         val current = database.syncStateDao().current() ?: SyncStateEntity()
-        if (current.backendInstanceId != null && current.backendInstanceId != meta.backendInstanceId) {
-            throw EndpointValidationException("Active endpoint identity changed")
-        }
+        if (current.backendInstanceId != null && current.backendInstanceId != meta.backendInstanceId) throw EndpointValidationException("Active endpoint identity changed")
         database.withTransaction { mergeMeta(meta) }
         var cursor = current.cursorRevision
-        var conflictDetected = false
+        var readOnly = false
         var hasMore: Boolean
         do {
-            val operations = database.outboxDao().next(100)
-            val response = api.sync(SyncRequestDto(
-                backendInstanceId = meta.backendInstanceId, cursorRevision = cursor,
-                deviceId = installationId(), mutations = operations.map { it.toDto() },
-            ))
+            val operations = database.withTransaction {
+                (if (readOnly) emptyList() else readyOperations()).also { database.outboxDao().markSent(it.map { row -> row.operationId }) }
+            }
+            val request = SyncRequestDto(backendInstanceId = meta.backendInstanceId, cursorRevision = cursor,
+                deviceId = installationId(), mutations = operations.map { it.toDto() })
+            val response = try { api.sync(request) } catch (error: HttpException) {
+                if (error.code() == 507) { readOnly = true; api.sync(request.copy(mutations = emptyList())) } else throw error
+            }
+            require(response.nextCursorRevision >= cursor) { "Server returned a backwards cursor" }
             database.withTransaction {
                 response.results.forEach { result ->
+                    val sent = operations.firstOrNull { it.operationId == result.operationId } ?: error("Unknown acknowledgement")
                     when (result.status) {
-                        "accepted", "duplicate" -> database.outboxDao().delete(result.operationId)
-                        "conflict" -> operations.firstOrNull { it.operationId == result.operationId }?.let { local ->
-                            database.conflictDao().deleteForEntity(local.entityType, local.entityId)
-                            database.conflictDao().upsert(ConflictEntity(
-                                result.operationId, local.entityType, local.entityId, local.payloadJson,
-                                result.entity?.let { json.encodeToString(com.dowdah.utilitytracker.network.EntityDto.serializer(), it) }, Instant.now().toString(),
-                            ))
-                            // A conflict is no longer a retryable mutation. The user can explicitly
-                            // keep the server version or create a fresh override operation.
+                        "accepted", "duplicate" -> {
+                            val entity = requireNotNull(result.entity)
                             database.outboxDao().delete(result.operationId)
-                            conflictDetected = true
+                            database.outboxDao().acknowledge(result.operationId, requireNotNull(entity.serverRevision))
+                            applyEntity(entity)
                         }
+                        "conflict" -> if (result.reason != "batch_aborted") {
+                            val latest = database.outboxDao().forEntity(sent.entityType, sent.entityId).lastOrNull() ?: sent
+                            database.conflictDao().deleteForEntity(sent.entityType, sent.entityId)
+                            database.conflictDao().upsert(ConflictEntity(operationId = sent.operationId, entityType = sent.entityType,
+                                entityId = sent.entityId, localPayloadJson = latest.payloadJson,
+                                serverEntityJson = result.entity?.let { json.encodeToString(EntityDto.serializer(), it) },
+                                createdAt = Instant.now().toString(), groupId = sent.groupId))
+                            database.outboxDao().deleteForEntity(sent.entityType, sent.entityId)
+                        }
+                        else -> error("Unknown acknowledgement status")
                     }
                 }
                 response.changes.forEach { applyChange(it.entity) }
-                database.syncStateDao().upsert(SyncStateEntity(
+                val conflictsRemain = database.conflictDao().all().isNotEmpty()
+                database.syncStateDao().upsert((database.syncStateDao().current() ?: SyncStateEntity()).copy(
                     backendInstanceId = meta.backendInstanceId, cursorRevision = response.nextCursorRevision,
-                    lastSuccessAt = System.currentTimeMillis(),
-                    lastError = if (conflictDetected) "Conflict needs resolution" else null,
-                ))
+                    lastSuccessAt = System.currentTimeMillis(), lastError = when {
+                        readOnly -> "Server writes are temporarily disabled"
+                        conflictsRemain -> "Conflict needs resolution"
+                        else -> null
+                    }))
             }
             cursor = response.nextCursorRevision
-            hasMore = response.hasMore
+            hasMore = response.hasMore || (!readOnly && readyOperations().isNotEmpty())
         } while (hasMore)
-        if (conflictDetected) SyncResult.ConflictDetected else SyncResult.Success
+        try {
+            val status = api.status()
+            database.withTransaction {
+                database.syncStateDao().upsert((database.syncStateDao().current() ?: SyncStateEntity()).copy(serverStatusJson = status.toString()))
+            }
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (_: Exception) { /* Last observed status remains visible with its timestamp. */ }
+        when {
+            readOnly -> SyncResult.ActionRequired("Server writes are temporarily disabled")
+            database.conflictDao().all().isNotEmpty() -> SyncResult.ConflictDetected
+            else -> SyncResult.Success
+        }
     } catch (error: HttpException) {
         val detail = when (error.code()) {
-            401 -> "Token is invalid or revoked"
-            409 -> "Backend identity changed"
+            401, 403 -> "Token is invalid or revoked"
+            409 -> "Backend identity or revision changed"
             422 -> "A pending change is invalid"
+            426 -> "Server or app upgrade required"
             507 -> "Server writes are temporarily disabled"
             else -> "Server error (${error.code()})"
         }
         if (error.code() >= 500 && error.code() != 507) syncRetryable(detail) else syncActionRequired(detail)
     } catch (error: IOException) {
         syncRetryable("Network connection failed: ${error.javaClass.simpleName}")
-    } catch (error: EndpointValidationException) {
-        syncActionRequired(error.message ?: "Sync needs attention")
+    } catch (cancelled: CancellationException) { throw cancelled }
+    catch (error: Exception) { syncActionRequired(error.message ?: "Sync needs attention") }
     }
 
     private suspend fun syncRetryable(detail: String): SyncResult {
@@ -254,29 +358,45 @@ class BackendRepository @Inject constructor(
         database.meterDao().upsertAll(meta.meters.map { MeterEntity(it.id, it.meterType, it.generation, it.unit, it.active, it.deleted, it.createdRevision) })
     }
 
-    private suspend fun applyEntity(entity: EntityDto) {
+    private suspend fun applyEntity(entity: EntityDto, force: Boolean = false) {
+        val conflict = database.conflictDao().forEntity(entity.entityType, entity.id)
+        if (conflict != null && !force) {
+            val previousRevision = conflict.serverEntityJson?.let { json.decodeFromString(EntityDto.serializer(), it).serverRevision } ?: 0
+            if ((entity.serverRevision ?: 0) >= previousRevision) database.conflictDao().upsert(conflict.copy(serverEntityJson = json.encodeToString(EntityDto.serializer(), entity)))
+            return
+        }
+        if (!force && database.outboxDao().forEntity(entity.entityType, entity.id).isNotEmpty()) return
+        val existingRevision = when (entity.entityType) {
+            "reading" -> database.readingDao().byId(entity.id)?.serverRevision
+            "tariff" -> database.tariffDao().byId(entity.id)?.serverRevision
+            "recharge" -> database.rechargeDao().byId(entity.id)?.serverRevision
+            else -> error("Unsupported entity type")
+        } ?: 0
+        if (!force && (entity.serverRevision ?: 0) < existingRevision) return
+        val revision = requireNotNull(entity.serverRevision)
         when (entity.entityType) {
-            "reading" -> if (entity.meterId != null && entity.valueDecimal != null && entity.recordedAt != null) database.readingDao().upsert(
-                ReadingEntity(entity.id, entity.meterId, entity.valueDecimal, entity.recordedAt, entity.note, entity.deleted, entity.serverRevision ?: 0),
-            )
-            "tariff" -> if (entity.meterId != null && entity.priceDecimal != null && entity.effectiveFrom != null) database.tariffDao().upsert(
-                TariffEntity(entity.id, entity.meterId, entity.priceDecimal, entity.currency ?: "CNY", entity.effectiveFrom, entity.deleted, entity.serverRevision ?: 0),
-            )
+            "reading" -> database.readingDao().upsert(ReadingEntity(entity.id, requireNotNull(entity.meterId), requireNotNull(entity.valueDecimal), requireNotNull(entity.recordedAt), entity.note, entity.deleted, revision))
+            "tariff" -> database.tariffDao().upsert(TariffEntity(entity.id, requireNotNull(entity.meterId), requireNotNull(entity.priceDecimal), entity.currency ?: "CNY", requireNotNull(entity.effectiveFrom), entity.deleted, revision))
+            "recharge" -> database.rechargeDao().upsert(RechargeEntity(entity.id, requireNotNull(entity.meterId), requireNotNull(entity.amountDecimal), requireNotNull(entity.unitPriceDecimal), requireNotNull(entity.quantityDecimal), entity.currency ?: "CNY", requireNotNull(entity.creditedAt), entity.note, entity.deleted, revision))
         }
     }
 
     private suspend fun applyLocalDraft(type: String, id: String, payload: JsonObject, revision: Long) {
+        fun field(key: String) = requireNotNull(payload[key]).jsonPrimitive.content
+        val note = payload["note"]?.let { if (it is kotlinx.serialization.json.JsonNull) null else it.jsonPrimitive.content }
         when (type) {
-            "reading" -> database.readingDao().upsert(ReadingEntity(id, payload["meter_id"]!!.jsonPrimitive.content, payload["value_decimal"]!!.jsonPrimitive.content, payload["recorded_at"]!!.jsonPrimitive.content, payload["note"]?.let { if (it is kotlinx.serialization.json.JsonNull) null else it.jsonPrimitive.content }, false, revision))
-            "tariff" -> database.tariffDao().upsert(TariffEntity(id, payload["meter_id"]!!.jsonPrimitive.content, payload["price_decimal"]!!.jsonPrimitive.content, "CNY", payload["effective_from"]!!.jsonPrimitive.content, false, revision))
+            "reading" -> database.readingDao().upsert(ReadingEntity(id, field("meter_id"), field("value_decimal"), field("recorded_at"), note, false, revision))
+            "tariff" -> database.tariffDao().upsert(TariffEntity(id, field("meter_id"), field("price_decimal"), "CNY", field("effective_from"), false, revision))
+            "recharge" -> database.rechargeDao().upsert(RechargeEntity(id, field("meter_id"), field("amount_decimal"), field("unit_price_decimal"), field("quantity_decimal"), "CNY", field("credited_at"), note, false, revision))
         }
     }
 
-    suspend fun exportCsv(output: java.io.OutputStream) {
+    suspend fun exportCsv(output: java.io.OutputStream, kind: String = "readings"): Unit = withContext(Dispatchers.IO) {
         val endpoint = database.endpointDao().active() ?: throw EndpointValidationException("No active endpoint")
         val token = secretStore.token() ?: throw EndpointValidationException("No token configured")
-        val response = client(endpoint.baseUrl, token).exportReadings()
+        val response = client(endpoint.baseUrl, token).exportLedger(kind)
         response.byteStream().use { input -> input.copyTo(output) }
+        Unit
     }
 
     private fun readingPayload(meterId: String, value: String, recordedAt: String, note: String?) = buildJsonObject {
@@ -302,10 +422,10 @@ class BackendRepository @Inject constructor(
         }
     }
 
-    private fun OutboxEntity.toDto() = MutationDto(operationId, entityType, entityId, kind, baseRevision, json.parseToJsonElement(payloadJson))
+    private fun OutboxEntity.toDto() = MutationDto(operationId, entityType, entityId, kind, baseRevision, json.parseToJsonElement(payloadJson), groupId, groupSize)
 
     private fun client(url: String, token: String? = null): BackendApi {
-        val http = OkHttpClient.Builder().connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+        val http = OkHttpClient.Builder().retryOnConnectionFailure(false).connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
             .readTimeout(5, java.util.concurrent.TimeUnit.SECONDS).addInterceptor { chain ->
             val request: Request = chain.request().newBuilder().apply {
                 if (token != null) header("Authorization", "Bearer $token")
@@ -321,7 +441,7 @@ class BackendRepository @Inject constructor(
         return try {
             val response = client(url).health()
             val latency = (System.nanoTime() - started) / 1_000_000
-            if (response.status == "ok" && response.database == "open" && response.writesEnabled) EndpointHealth(true, "Healthy", latency)
+            if (response.status == "ok" && response.database == "open") EndpointHealth(true, "Healthy", latency)
             else EndpointHealth(false, "Server is not accepting writes", latency)
         } catch (_: Exception) {
             EndpointHealth(false, "Cannot reach a healthy Utility Sync server")
@@ -329,7 +449,9 @@ class BackendRepository @Inject constructor(
     }
 
     private fun canonicalDecimal(value: String): String {
+        require(value.length <= 128) { "Number exceeds supported precision" }
         val decimal = value.toBigDecimalOrNull() ?: throw IllegalArgumentException("Reading must be a decimal")
+        require(decimal.scale() <= 24 && decimal.precision() - decimal.scale() <= 25) { "Number exceeds supported precision" }
         require(decimal >= BigDecimal.ZERO) { "Reading cannot be negative" }
         return decimal.stripTrailingZeros().toPlainString().ifBlank { "0" }
     }

@@ -28,6 +28,7 @@ class AppViewModel @Inject constructor(
     val dashboard = repository.dashboard().stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), DashboardData(emptyList(), emptyList(), null, 0))
     val readings = repository.readings.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val meters = repository.meters.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val recharges = repository.recharges.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val tariffs = repository.tariffs.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     val conflicts = repository.conflicts.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
     private val messageState = mutableStateOf<String?>(savedState["message"])
@@ -41,6 +42,57 @@ class AppViewModel @Inject constructor(
         scheduler.enqueue()
     }
 
+
+    private val rechargeJson = kotlinx.serialization.json.Json { encodeDefaults = true }
+    private val rechargeDraftState = mutableStateOf(savedState.get<String>("rechargeDraft")?.let {
+        runCatching { rechargeJson.decodeFromString(RechargeDraft.serializer(), it) }.getOrNull()
+    } ?: RechargeDraft())
+    var rechargeDraft: RechargeDraft
+        get() = rechargeDraftState.value
+        private set(value) { rechargeDraftState.value = value; savedState["rechargeDraft"] = rechargeJson.encodeToString(RechargeDraft.serializer(), value) }
+    var formBusy by mutableStateOf(false)
+        private set
+    private val rechargeTabState = mutableStateOf(savedState["rechargeTab"] ?: false)
+    var rechargeTab: Boolean
+        get() = rechargeTabState.value
+        set(value) { rechargeTabState.value = value; savedState["rechargeTab"] = value }
+    private val statisticsModeState = mutableStateOf(savedState["statisticsMode"] ?: "month")
+    var statisticsMode: String
+        get() = statisticsModeState.value
+        set(value) { statisticsModeState.value = value; savedState["statisticsMode"] = value }
+    private val statisticsAnchorState = mutableStateOf(savedState["statisticsAnchor"] ?: java.time.LocalDate.now().toString())
+    var statisticsAnchor: String
+        get() = statisticsAnchorState.value
+        set(value) { statisticsAnchorState.value = value; savedState["statisticsAnchor"] = value }
+    private fun purchasePrice(meterId: String, at: String): String = tariffs.value.filter { !it.deleted && it.meterId == meterId && Instant.parse(it.effectiveFrom) <= Instant.parse(at) }.maxByOrNull { Instant.parse(it.effectiveFrom) }?.priceDecimal.orEmpty()
+    fun openNewRecharge() {
+        val meter = defaultReadingMeterId(meters.value)
+        val at = Instant.now().toString()
+        rechargeDraft = RechargeDraft(open = true, meterId = meter, creditedAt = at, price = purchasePrice(meter, at))
+        message = null
+    }
+    fun openRecharge(item: com.dowdah.utilitytracker.data.RechargeEntity) {
+        rechargeDraft = RechargeDraft(open = true, id = item.id, meterId = item.meterId, amount = item.amountDecimal, price = item.unitPriceDecimal,
+            creditedAt = item.creditedAt, note = item.note.orEmpty(), priceEdited = true)
+        message = null
+    }
+    fun updateRecharge(draft: RechargeDraft) {
+        rechargeDraft = if (!draft.priceEdited && (draft.meterId != rechargeDraft.meterId || draft.creditedAt != rechargeDraft.creditedAt))
+            draft.copy(price = purchasePrice(draft.meterId, draft.creditedAt)) else draft
+    }
+    fun closeRecharge() { rechargeDraft = rechargeDraft.copy(open = false) }
+    fun persistRecharge() = viewModelScope.launch {
+        if (formBusy) return@launch
+        formBusy = true
+        val draft = rechargeDraft
+        runCatching { repository.saveRecharge(draft.id, draft.meterId, draft.amount, draft.price, draft.creditedAt,
+            draft.note.ifBlank { null }, draft.remaining.ifBlank { null }) }
+            .onSuccess { closeRecharge(); scheduler.enqueue(); message = "Saved locally" }.onFailure { message = it.message }
+        formBusy = false
+    }
+    fun deleteRecharge(item: com.dowdah.utilitytracker.data.RechargeEntity) = viewModelScope.launch {
+        runCatching { repository.deleteRecharge(item) }.onSuccess { scheduler.enqueue() }.onFailure { message = it.message }
+    }
     private val recordFilterState = mutableStateOf<String?>(savedState["recordFilter"])
     var recordFilter: String?
         get() = recordFilterState.value
@@ -70,10 +122,16 @@ class AppViewModel @Inject constructor(
     var readingNote: String
         get() = readingNoteState.value
         set(value) { readingNoteState.value = value; savedState["readingNote"] = value }
-    fun openNewReading() { readingEditorId = null; readingMeterId = defaultReadingMeterId(meters.value); readingValue = ""; readingRecordedAt = Instant.now().toString(); readingNote = ""; readingEditorOpen = true }
-    fun openReading(reading: com.dowdah.utilitytracker.data.ReadingEntity) { readingEditorId = reading.id; readingMeterId = reading.meterId; readingValue = reading.valueDecimal; readingRecordedAt = reading.recordedAt; readingNote = reading.note.orEmpty(); readingEditorOpen = true }
+    fun openNewReading() { readingEditorId = null; readingMeterId = defaultReadingMeterId(meters.value); readingValue = ""; readingRecordedAt = Instant.now().toString(); readingNote = ""; readingEditorOpen = true; message = null }
+    fun openReading(reading: com.dowdah.utilitytracker.data.ReadingEntity) { readingEditorId = reading.id; readingMeterId = reading.meterId; readingValue = reading.valueDecimal; readingRecordedAt = reading.recordedAt; readingNote = reading.note.orEmpty(); readingEditorOpen = true; message = null }
     fun closeReadingEditor() { readingEditorOpen = false; readingEditorId = null }
-    fun persistReadingDraft() = saveReading(readingEditorId, readingMeterId, readingValue, readingRecordedAt, readingNote.ifBlank { null }).also { closeReadingEditor() }
+    fun persistReadingDraft() = viewModelScope.launch {
+        if (formBusy) return@launch
+        formBusy = true
+        runCatching { repository.saveReading(readingEditorId, readingMeterId, readingValue, readingRecordedAt, readingNote.ifBlank { null }) }
+            .onSuccess { closeReadingEditor(); scheduler.enqueue(); message = "Saved locally" }.onFailure { message = it.message }
+        formBusy = false
+    }
 
     private val tariffEditorOpenState = mutableStateOf(savedState["tariffEditorOpen"] ?: false)
     private val tariffEditorIdState = mutableStateOf<String?>(savedState["tariffEditorId"])
@@ -95,10 +153,16 @@ class AppViewModel @Inject constructor(
     var tariffEffectiveFrom: String
         get() = tariffEffectiveFromState.value
         set(value) { tariffEffectiveFromState.value = value; savedState["tariffEffectiveFrom"] = value }
-    fun openNewTariff(defaultMeterId: String) { tariffEditorId = null; tariffMeterId = defaultMeterId; tariffPrice = ""; tariffEffectiveFrom = Instant.now().toString(); tariffEditorOpen = true }
-    fun openTariff(tariff: com.dowdah.utilitytracker.data.TariffEntity) { tariffEditorId = tariff.id; tariffMeterId = tariff.meterId; tariffPrice = tariff.priceDecimal; tariffEffectiveFrom = tariff.effectiveFrom; tariffEditorOpen = true }
+    fun openNewTariff(defaultMeterId: String) { tariffEditorId = null; tariffMeterId = defaultMeterId; tariffPrice = ""; tariffEffectiveFrom = Instant.now().toString(); tariffEditorOpen = true; message = null }
+    fun openTariff(tariff: com.dowdah.utilitytracker.data.TariffEntity) { tariffEditorId = tariff.id; tariffMeterId = tariff.meterId; tariffPrice = tariff.priceDecimal; tariffEffectiveFrom = tariff.effectiveFrom; tariffEditorOpen = true; message = null }
     fun closeTariffEditor() { tariffEditorOpen = false; tariffEditorId = null }
-    fun persistTariffDraft() = saveTariff(tariffEditorId, tariffMeterId, tariffPrice, tariffEffectiveFrom).also { closeTariffEditor() }
+    fun persistTariffDraft() = viewModelScope.launch {
+        if (formBusy) return@launch
+        formBusy = true
+        runCatching { repository.saveTariff(tariffEditorId, tariffMeterId, tariffPrice, tariffEffectiveFrom) }
+            .onSuccess { closeTariffEditor(); scheduler.enqueue(); message = "Saved locally" }.onFailure { message = it.message }
+        formBusy = false
+    }
 
     private val rangePickerOpenState = mutableStateOf(savedState["rangePickerOpen"] ?: false)
     private val statisticsStartState = mutableStateOf<String?>(savedState["statisticsStart"])
@@ -122,15 +186,15 @@ class AppViewModel @Inject constructor(
     fun deleteTariff(tariff: com.dowdah.utilitytracker.data.TariffEntity) = viewModelScope.launch { runCatching { repository.deleteTariff(tariff) }.onSuccess { scheduler.enqueue() }.onFailure { message = it.message } }
     fun keepServer(conflict: com.dowdah.utilitytracker.data.ConflictEntity) = viewModelScope.launch { runCatching { repository.keepServerConflict(conflict) }.onFailure { message = it.message } }
     fun overrideServer(conflict: com.dowdah.utilitytracker.data.ConflictEntity) = viewModelScope.launch { runCatching { repository.overrideConflict(conflict) }.onSuccess { scheduler.enqueue() }.onFailure { message = it.message } }
-    fun exportCsv(context: android.content.Context, uri: android.net.Uri) = viewModelScope.launch {
-        runCatching { requireNotNull(context.contentResolver.openOutputStream(uri)).use { repository.exportCsv(it) } }
+    fun exportCsv(context: android.content.Context, uri: android.net.Uri, kind: String = "readings") = viewModelScope.launch {
+        runCatching { requireNotNull(context.contentResolver.openOutputStream(uri)).use { repository.exportCsv(it, kind) } }
             .onSuccess { message = "Export complete" }.onFailure { message = it.message }
     }
     fun sync(onComplete: (() -> Unit)? = null) = viewModelScope.launch {
         message = when (val result = repository.sync()) {
             SyncResult.Success -> "Sync complete"
             SyncResult.ConflictDetected -> "Conflict detected. Open Settings to resolve it."
-            is SyncResult.Retryable -> "Sync queued to retry: ${result.detail}"
+            is SyncResult.Retryable -> { scheduler.enqueue(); "Sync queued to retry: ${result.detail}" }
             is SyncResult.ActionRequired -> result.detail
         }
         onComplete?.invoke()
@@ -187,3 +251,10 @@ class EndpointViewModel @Inject constructor(
     fun saveToken(token: String) { repository.saveToken(token); showTokenEditor = false; notice = "Token saved. Select an endpoint to verify it." }
     fun clearToken() { repository.clearToken(); error = null }
 }
+
+@kotlinx.serialization.Serializable
+data class RechargeDraft(
+    val open: Boolean = false, val id: String? = null, val meterId: String = "",
+    val amount: String = "", val price: String = "", val creditedAt: String = "",
+    val note: String = "", val remaining: String = "", val priceEdited: Boolean = false,
+)
