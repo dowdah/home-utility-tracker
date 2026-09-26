@@ -95,14 +95,22 @@ import kotlinx.serialization.json.jsonPrimitive
 @Composable
 fun HomeScreen(viewModel: AppViewModel) {
     val dashboard by viewModel.dashboard.collectAsState()
+    val tariffs by viewModel.tariffs.collectAsState()
+    val recharges by viewModel.recharges.collectAsState()
+    val conflicts by viewModel.conflicts.collectAsState()
     val columns = integerResource(R.integer.dashboard_columns)
     var refreshing by remember { mutableStateOf(false) }
-    val latest = dashboard.readings.groupBy { it.meterId }.mapValues { (_, rows) -> rows.maxByOrNull { it.recordedAt } }
+    val latest = dashboard.readings.groupBy { it.meterId }.mapValues { (_, rows) -> rows.maxByOrNull { Instant.parse(it.recordedAt) } }
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; viewModel.sync { refreshing = false } }) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 12.dp).verticalScroll(rememberScrollState())) {
-            SyncSummary(dashboard.pendingCount, viewModel.message)
+            PersistentSyncSummary(dashboard, conflicts.size, viewModel.message)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                dashboard.meters.forEach { MeterCard(it, latest[it.id], columns) }
+                dashboard.meters.forEach { meter ->
+                    Column(Modifier.fillMaxWidth(if (columns > 1) .31f else 1f)) {
+                        MeterCard(meter, latest[meter.id], 1)
+                        HomeMonthlySummary(meter, dashboard.readings, tariffs, recharges)
+                    }
+                }
             }
         }
     }
@@ -120,6 +128,7 @@ fun HomeScreen(viewModel: AppViewModel) {
         Text(meterLabel(meter), style = MaterialTheme.typography.titleMedium)
         Text(reading?.let { "${it.valueDecimal} ${meter.unit}" } ?: "—", style = MaterialTheme.typography.headlineSmall)
         Text(reading?.recordedAt?.localDisplay() ?: stringResource(R.string.no_reading))
+        reading?.let { Text(stringResource(R.string.days_since_reading, java.time.Duration.between(Instant.parse(it.recordedAt), Instant.now()).toDays().coerceAtLeast(0)), style = MaterialTheme.typography.bodySmall) }
     }
 }
 
@@ -136,14 +145,23 @@ fun RecordsScreen(viewModel: AppViewModel) {
                 FilterChip(selected = viewModel.recordFilter == null, onClick = { viewModel.recordFilter = null }, label = { Text(stringResource(R.string.all)) })
                 meters.forEach { meter -> FilterChip(selected = viewModel.recordFilter == meter.id, onClick = { viewModel.recordFilter = meter.id }, label = { Text(meterLabel(meter)) }) }
             }
-            Button(onClick = { viewModel.openNewReading() }) { Icon(Icons.Default.Add, stringResource(R.string.add_reading)); Text(stringResource(R.string.add_reading)) }
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(readings.filter { viewModel.recordFilter == null || it.meterId == viewModel.recordFilter }, key = { it.id }) { reading ->
-                    ReadingCard(reading, meters.firstOrNull { it.id == reading.meterId }, onEdit = { viewModel.openReading(reading) }, onDelete = { deleteTarget = reading })
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(!viewModel.rechargeTab, { viewModel.rechargeTab = false }, label = { Text(stringResource(R.string.readings_tab)) })
+                FilterChip(viewModel.rechargeTab, { viewModel.rechargeTab = true }, label = { Text(stringResource(R.string.recharges_tab)) })
+            }
+            if (viewModel.rechargeTab) RechargeRecords(viewModel, meters)
+            else {
+                Button(onClick = { viewModel.openNewReading() }) { Icon(Icons.Default.Add, stringResource(R.string.add_reading)); Text(stringResource(R.string.add_reading)) }
+                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (readings.isEmpty()) item { Text(stringResource(R.string.no_records)) }
+                    items(readings.filter { viewModel.recordFilter == null || it.meterId == viewModel.recordFilter }.sortedByDescending { Instant.parse(it.recordedAt) }, key = { it.id }) { reading ->
+                        ReadingCard(reading, meters.firstOrNull { it.id == reading.meterId }, onEdit = { viewModel.openReading(reading) }, onDelete = { deleteTarget = reading })
+                    }
                 }
             }
         }
     }
+    if (viewModel.rechargeDraft.open) RechargeEditor(viewModel, meters)
     if (viewModel.readingEditorOpen) ReadingEditor(viewModel, meters, readings)
     deleteTarget?.let { reading -> ConfirmationDialog(stringResource(R.string.delete_reading), stringResource(R.string.delete_reading_message), { deleteTarget = null }) { viewModel.deleteReading(reading); deleteTarget = null } }
 }
@@ -160,21 +178,23 @@ fun RecordsScreen(viewModel: AppViewModel) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable private fun ReadingEditor(viewModel: AppViewModel, meters: List<MeterEntity>, existing: List<ReadingEntity>) {
+    val recharges by viewModel.recharges.collectAsState()
     var confirmIncrease by rememberSaveable { mutableStateOf(false) }
     AlertDialog(onDismissRequest = viewModel::closeReadingEditor, title = { Text(if (viewModel.readingEditorId == null) stringResource(R.string.add_reading) else stringResource(R.string.edit_reading)) }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         MeterChooser(meters, viewModel.readingMeterId) { viewModel.readingMeterId = it }
         if (meters.none { it.id == viewModel.readingMeterId }) Text(stringResource(R.string.reading_meter_required), color = MaterialTheme.colorScheme.error)
         OutlinedTextField(viewModel.readingValue, { viewModel.readingValue = it }, label = { Text(stringResource(R.string.reading_value)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
         DateTimeField(viewModel.readingRecordedAt) { viewModel.readingRecordedAt = it }
+        viewModel.message?.let { Text(localizedMessage(it) ?: it, color = MaterialTheme.colorScheme.error) }
         OutlinedTextField(viewModel.readingNote, { viewModel.readingNote = it }, label = { Text(stringResource(R.string.note)) }, modifier = Modifier.fillMaxWidth())
-    } }, confirmButton = { Button(enabled = meters.any { it.id == viewModel.readingMeterId } && (viewModel.readingValue.toBigDecimalOrNull()?.signum()?.let { it >= 0 } == true), onClick = {
-        if (remainingReadingIncreases(existing, viewModel.readingEditorId, viewModel.readingMeterId, viewModel.readingValue, viewModel.readingRecordedAt)) confirmIncrease = true else viewModel.persistReadingDraft()
+    } }, confirmButton = { Button(enabled = !viewModel.formBusy && meters.any { it.id == viewModel.readingMeterId } && (viewModel.readingValue.toBigDecimalOrNull()?.signum()?.let { it >= 0 } == true), onClick = {
+        if (remainingReadingIncreases(existing, viewModel.readingEditorId, viewModel.readingMeterId, viewModel.readingValue, viewModel.readingRecordedAt, recharges)) confirmIncrease = true else viewModel.persistReadingDraft()
     }) { Text(stringResource(R.string.save)) } }, dismissButton = { TextButton(onClick = viewModel::closeReadingEditor) { Text(stringResource(R.string.cancel)) } })
     if (confirmIncrease) ConfirmationDialog(stringResource(R.string.remaining_increased), stringResource(R.string.increase_confirmation), { confirmIncrease = false }) { confirmIncrease = false; viewModel.persistReadingDraft() }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun MeterChooser(meters: List<MeterEntity>, selected: String, onSelect: (String) -> Unit) {
+@Composable internal fun MeterChooser(meters: List<MeterEntity>, selected: String, onSelect: (String) -> Unit) {
     var expanded by remember { mutableStateOf(false) }
     val label = meters.firstOrNull { it.id == selected }?.let { meterLabel(it) } ?: stringResource(R.string.select_meter)
     ExposedDropdownMenuBox(expanded, { expanded = !expanded }) {
@@ -184,49 +204,17 @@ fun RecordsScreen(viewModel: AppViewModel) {
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun DateTimeField(instantText: String, onChanged: (String) -> Unit) {
+@Composable internal fun DateTimeField(instantText: String, onChanged: (String) -> Unit) {
     var showDate by rememberSaveable { mutableStateOf(false) }; var showTime by rememberSaveable { mutableStateOf(false) }
     val local = remember(instantText) { runCatching { LocalDateTime.ofInstant(Instant.parse(instantText), ZoneId.systemDefault()) }.getOrElse { LocalDateTime.now() } }
     OutlinedTextField(local.format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT).withLocale(Locale.getDefault())), {}, readOnly = true, label = { Text(stringResource(R.string.recorded_at)) }, modifier = Modifier.fillMaxWidth().padding(bottom = 0.dp), trailingIcon = { TextButton(onClick = { showDate = true }) { Text(stringResource(R.string.change)) } })
     if (showDate) {
-        val state = rememberDatePickerState(initialSelectedDateMillis = local.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli())
-        DatePickerDialog(onDismissRequest = { showDate = false }, confirmButton = { TextButton(onClick = { val picked = state.selectedDateMillis ?: return@TextButton; val changed = LocalDateTime.ofInstant(Instant.ofEpochMilli(picked), ZoneId.systemDefault()).withHour(local.hour).withMinute(local.minute); onChanged(changed.atZone(ZoneId.systemDefault()).toInstant().toString()); showDate = false; showTime = true }) { Text(stringResource(R.string.next)) } }) { DatePicker(state) }
+        val state = rememberDatePickerState(initialSelectedDateMillis = local.toLocalDate().atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli())
+        DatePickerDialog(onDismissRequest = { showDate = false }, confirmButton = { TextButton(onClick = { val picked = state.selectedDateMillis ?: return@TextButton; val changed = LocalDateTime.ofInstant(Instant.ofEpochMilli(picked), java.time.ZoneOffset.UTC).withHour(local.hour).withMinute(local.minute); onChanged(changed.atZone(ZoneId.systemDefault()).toInstant().toString()); showDate = false; showTime = true }) { Text(stringResource(R.string.next)) } }) { DatePicker(state) }
     }
     if (showTime) {
         val state = rememberTimePickerState(local.hour, local.minute, true)
         AlertDialog(onDismissRequest = { showTime = false }, confirmButton = { TextButton(onClick = { val changed = local.withHour(state.hour).withMinute(state.minute); onChanged(changed.atZone(ZoneId.systemDefault()).toInstant().toString()); showTime = false }) { Text(stringResource(R.string.save)) } }, dismissButton = { TextButton(onClick = { showTime = false }) { Text(stringResource(R.string.cancel)) } }, text = { TimePicker(state) })
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun StatisticsScreen(viewModel: AppViewModel, onTariffs: () -> Unit) {
-    val readings by viewModel.readings.collectAsState(); val tariffs by viewModel.tariffs.collectAsState(); val meters by viewModel.meters.collectAsState()
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp)) {
-        OutlinedButton(onClick = { viewModel.rangePickerOpen = true }) { Text(stringResource(R.string.range) + ": " + (viewModel.statisticsStart?.take(10) ?: stringResource(R.string.all_time)) + " – " + (viewModel.statisticsEnd?.take(10) ?: stringResource(R.string.today))) }
-        Text(stringResource(R.string.interval_attribution), style = MaterialTheme.typography.bodySmall)
-        meters.forEach { meter -> StatisticsCard(meter, readings.filter { it.meterId == meter.id }, tariffs.filter { it.meterId == meter.id }, viewModel.statisticsStart, viewModel.statisticsEnd, onTariffs) }
-    }
-    if (viewModel.rangePickerOpen) { val state = rememberDateRangePickerState(); DatePickerDialog(onDismissRequest = { viewModel.rangePickerOpen = false }, confirmButton = { TextButton(onClick = { state.selectedStartDateMillis?.let { viewModel.statisticsStart = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().atStartOfDay(ZoneId.systemDefault()).toInstant().toString() }; state.selectedEndDateMillis?.let { viewModel.statisticsEnd = Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate().atTime(LocalTime.MAX).atZone(ZoneId.systemDefault()).toInstant().toString() } ?: run { viewModel.statisticsEnd = Instant.now().toString() }; viewModel.rangePickerOpen = false }) { Text(stringResource(R.string.save)) } }) { DateRangePicker(state) } }
-}
-
-@Composable private fun StatisticsCard(meter: MeterEntity, readings: List<ReadingEntity>, tariffs: List<TariffEntity>, start: String?, end: String?, onTariffs: () -> Unit) {
-    val summary = statisticsForRange(readings, tariffs, start, end)
-    val consumption = summary.consumption?.let { "${it.stripTrailingZeros().toPlainString()} ${meter.unit}" } ?: "—"
-    val cost = summary.cost?.let(::formatCny) ?: "—"
-    ElevatedCard(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(meterLabel(meter), style = MaterialTheme.typography.titleMedium)
-            Text("${stringResource(if (summary.hasIncrease) R.string.partial_consumption else R.string.consumption)}: $consumption")
-            Text("${stringResource(if (summary.cost != null && summary.costEstimated) R.string.estimated_cost else R.string.cost)}: $cost")
-            if (summary.consumption == null && !summary.hasIncrease) Text(stringResource(R.string.insufficient_readings))
-            if (summary.hasIncrease) Text(stringResource(R.string.incomplete_increase), color = MaterialTheme.colorScheme.error)
-            if (!summary.hasTariffs || summary.hasMissingTariff) {
-                Text(stringResource(if (!summary.hasTariffs) R.string.no_tariff else R.string.missing_period_tariff), color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = onTariffs) { Text(stringResource(R.string.configure_tariffs)) }
-            }
-            if (summary.cost != null && summary.costEstimated) Text(stringResource(R.string.estimated_cost_hint), style = MaterialTheme.typography.bodySmall)
-        }
     }
 }
 
@@ -267,7 +255,7 @@ fun EndpointScreen(onBack: () -> Unit, viewModel: EndpointViewModel = hiltViewMo
     deleteTarget?.let { tariff -> ConfirmationDialog(stringResource(R.string.delete), stringResource(R.string.delete_tariff_message), { deleteTarget = null }) { viewModel.deleteTariff(tariff); deleteTarget = null } }
 }
 @Composable private fun TariffCard(tariff: TariffEntity, meter: MeterEntity?, onEdit: () -> Unit, onDelete: () -> Unit) { var menu by remember { mutableStateOf(false) }; ElevatedCard(Modifier.fillMaxWidth()) { ListItem(headlineContent = { Text(formatCny(tariff.priceDecimal.toBigDecimalOrNull() ?: java.math.BigDecimal.ZERO)) }, supportingContent = { Text(tariff.effectiveFrom.localDisplay()) }, overlineContent = { Text(meter?.let { meterLabel(it) }.orEmpty()) }, trailingContent = { IconButton({ menu = true }) { Icon(Icons.Default.MoreVert, stringResource(R.string.more)) }; DropdownMenu(menu, { menu = false }) { DropdownMenuItem(text = { Text(stringResource(R.string.edit)) }, onClick = { menu = false; onEdit() }); DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, onClick = { menu = false; onDelete() }) } }) } }
-@Composable private fun TariffEditor(viewModel: AppViewModel, meters: List<MeterEntity>) = AlertDialog(onDismissRequest = viewModel::closeTariffEditor, title = { Text(if (viewModel.tariffEditorId == null) stringResource(R.string.add_tariff) else stringResource(R.string.edit)) }, text = { Column { MeterChooser(meters, viewModel.tariffMeterId) { viewModel.tariffMeterId = it }; OutlinedTextField(viewModel.tariffPrice, { viewModel.tariffPrice = it }, label = { Text(stringResource(R.string.price)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); DateTimeField(viewModel.tariffEffectiveFrom) { viewModel.tariffEffectiveFrom = it } } }, confirmButton = { Button(viewModel::persistTariffDraft) { Text(stringResource(R.string.save)) } }, dismissButton = { TextButton(viewModel::closeTariffEditor) { Text(stringResource(R.string.cancel)) } })
+@Composable private fun TariffEditor(viewModel: AppViewModel, meters: List<MeterEntity>) = AlertDialog(onDismissRequest = viewModel::closeTariffEditor, title = { Text(if (viewModel.tariffEditorId == null) stringResource(R.string.add_tariff) else stringResource(R.string.edit)) }, text = { Column { MeterChooser(meters, viewModel.tariffMeterId) { viewModel.tariffMeterId = it }; OutlinedTextField(viewModel.tariffPrice, { viewModel.tariffPrice = it }, label = { Text(stringResource(R.string.price)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); DateTimeField(viewModel.tariffEffectiveFrom) { viewModel.tariffEffectiveFrom = it } } }, confirmButton = { Button(viewModel::persistTariffDraft, enabled = !viewModel.formBusy && meters.any { it.id == viewModel.tariffMeterId } && viewModel.tariffPrice.toBigDecimalOrNull()?.signum()?.let { it >= 0 } == true) { Text(stringResource(R.string.save)) } }, dismissButton = { TextButton(viewModel::closeTariffEditor) { Text(stringResource(R.string.cancel)) } })
 
 @Composable fun ConflictScreen(viewModel: AppViewModel, onBack: () -> Unit) { val conflicts by viewModel.conflicts.collectAsState(); Scaffold(topBar = { SimpleBackBar(stringResource(R.string.conflicts), onBack) }) { padding -> LazyColumn(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { items(conflicts, key = { it.operationId }) { conflict -> ConflictCard(conflict, { viewModel.keepServer(conflict) }, { viewModel.overrideServer(conflict) }) } } } }
 @Composable private fun ConflictCard(conflict: ConflictEntity, keep: () -> Unit, override: () -> Unit) {
@@ -275,24 +263,39 @@ fun EndpointScreen(onBack: () -> Unit, viewModel: EndpointViewModel = hiltViewMo
     val local = remember(conflict.localPayloadJson) { runCatching { json.parseToJsonElement(conflict.localPayloadJson).jsonObject }.getOrNull() }
     val server = remember(conflict.serverEntityJson) { conflict.serverEntityJson?.let { runCatching { json.parseToJsonElement(it).jsonObject }.getOrNull() } }
     fun kotlinx.serialization.json.JsonObject?.value(): String? = this?.get("value_decimal")?.jsonPrimitive?.content
-        ?: this?.get("price_decimal")?.jsonPrimitive?.content
+        ?: this?.get("price_decimal")?.jsonPrimitive?.content ?: this?.get("amount_decimal")?.jsonPrimitive?.content
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(if (conflict.entityType == "reading") stringResource(R.string.reading_value) else stringResource(R.string.price), style = MaterialTheme.typography.titleMedium)
+            Text(when (conflict.entityType) { "reading" -> stringResource(R.string.reading_value); "recharge" -> stringResource(R.string.recharges_tab); else -> stringResource(R.string.price) }, style = MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.server_revision, server?.get("server_revision")?.jsonPrimitive?.content ?: stringResource(R.string.unknown)), style = MaterialTheme.typography.bodySmall)
             Text(stringResource(R.string.local_draft, local.value() ?: if (conflict.localPayloadJson == "{}") stringResource(R.string.delete) else stringResource(R.string.unavailable_value)))
             Text(stringResource(R.string.server_value, server.value() ?: if (server?.get("deleted")?.jsonPrimitive?.content == "true") stringResource(R.string.deleted) else stringResource(R.string.unavailable_value)))
+            if (conflict.groupId != null) Text(stringResource(R.string.linked_conflict))
             Text(stringResource(R.string.conflict_description), style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(keep) { Text(stringResource(R.string.keep_server)) }; Button(override) { Text(stringResource(R.string.override_server)) } }
         }
     }
 }
 
-@Composable fun ExportScreen(viewModel: AppViewModel, onBack: () -> Unit) { val context = LocalContext.current; val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> uri?.let { viewModel.exportCsv(context, it) } }; Scaffold(topBar = { SimpleBackBar(stringResource(R.string.export_csv), onBack) }) { padding -> Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { Text(stringResource(R.string.export_description)); Button({ launcher.launch("readings.csv") }) { Icon(Icons.Default.FileDownload, stringResource(R.string.export_csv)); Text(stringResource(R.string.export_csv)) } } } }
+@Composable fun ExportScreen(viewModel: AppViewModel, onBack: () -> Unit) {
+    val context = LocalContext.current
+    var kind by rememberSaveable { mutableStateOf("readings") }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> uri?.let { viewModel.exportCsv(context, it, kind) } }
+    Scaffold(topBar = { SimpleBackBar(stringResource(R.string.export_csv), onBack) }) { padding ->
+        Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Text(stringResource(R.string.export_description))
+            listOf("readings" to R.string.readings_tab, "recharges" to R.string.recharges_tab, "tariffs" to R.string.tariff_history).forEach { (value, label) ->
+                FilterChip(kind == value, { kind = value }, label = { Text(stringResource(label)) })
+            }
+            Button({ launcher.launch("$kind.csv") }, modifier = Modifier.semantics { testTag = "export_save" }) { Text(stringResource(R.string.export_csv)) }
+            viewModel.message?.let { Text(localizedMessage(it) ?: it) }
+        }
+    }
+}
 @OptIn(ExperimentalMaterial3Api::class)
-@Composable private fun SimpleBackBar(title: String, onBack: () -> Unit, onAdd: (() -> Unit)? = null) = CenterAlignedTopAppBar(title = { Text(title) }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } }, actions = { onAdd?.let { IconButton(it) { Icon(Icons.Default.Add, stringResource(R.string.add)) } } })
-@Composable private fun ConfirmationDialog(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) = AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(message) }, confirmButton = { Button({ onConfirm(); onDismiss() }) { Text(stringResource(R.string.confirm)) } }, dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } })
-@Composable private fun meterLabel(meter: MeterEntity): String = when (meter.meterType.lowercase(Locale.ROOT)) {
+@Composable internal fun SimpleBackBar(title: String, onBack: () -> Unit, onAdd: (() -> Unit)? = null) = CenterAlignedTopAppBar(title = { Text(title) }, navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, stringResource(R.string.back)) } }, actions = { onAdd?.let { IconButton(it) { Icon(Icons.Default.Add, stringResource(R.string.add)) } } })
+@Composable internal fun ConfirmationDialog(title: String, message: String, onDismiss: () -> Unit, onConfirm: () -> Unit) = AlertDialog(onDismissRequest = onDismiss, title = { Text(title) }, text = { Text(message) }, confirmButton = { Button({ onConfirm(); onDismiss() }) { Text(stringResource(R.string.confirm)) } }, dismissButton = { TextButton(onDismiss) { Text(stringResource(R.string.cancel)) } })
+@Composable internal fun meterLabel(meter: MeterEntity): String = when (meter.meterType.lowercase(Locale.ROOT)) {
     "cold_water" -> stringResource(R.string.cold_water)
     "hot_water" -> stringResource(R.string.hot_water)
     "electricity" -> stringResource(R.string.electricity)
@@ -305,8 +308,17 @@ fun EndpointScreen(onBack: () -> Unit, viewModel: EndpointViewModel = hiltViewMo
     else -> status
 }
 
-@Composable private fun localizedMessage(message: String?): String? = message?.let { value ->
+@Composable internal fun localizedMessage(message: String?): String? = message?.let { value ->
     when {
+        value == "Server or app upgrade required" -> stringResource(R.string.server_upgrade_required)
+        value == "Enter a positive amount and purchase price" -> stringResource(R.string.positive_purchase)
+        value == "Number exceeds supported precision" -> stringResource(R.string.precision_error)
+        value == "Token is invalid or revoked" -> stringResource(R.string.auth_error)
+        value == "Backend identity or revision changed" || value == "Active endpoint identity changed" -> stringResource(R.string.identity_error)
+        value == "A pending change is invalid" -> stringResource(R.string.invalid_pending)
+        value == "Server writes are temporarily disabled" -> stringResource(R.string.server_disk_low)
+        value == "Conflict needs resolution" -> stringResource(R.string.conflict_detected)
+        value == "Note must be at most 1000 characters" -> stringResource(R.string.note_too_long)
         value == "Saved locally" -> stringResource(R.string.saved_locally)
         value == "Export complete" -> stringResource(R.string.export_complete)
         value == "Sync complete" -> stringResource(R.string.sync_complete)
@@ -323,13 +335,13 @@ fun EndpointScreen(onBack: () -> Unit, viewModel: EndpointViewModel = hiltViewMo
     }
 }
 
-private fun formatCny(value: java.math.BigDecimal): String = NumberFormat.getCurrencyInstance(Locale.getDefault()).apply {
+internal fun formatCny(value: java.math.BigDecimal): String = NumberFormat.getCurrencyInstance(Locale.getDefault()).apply {
     currency = Currency.getInstance("CNY")
     maximumFractionDigits = 2
     minimumFractionDigits = 2
 }.format(value)
 
-private fun String.localDisplay(): String = runCatching {
+internal fun String.localDisplay(): String = runCatching {
     LocalDateTime.ofInstant(Instant.parse(this), ZoneId.systemDefault())
         .format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT).withLocale(Locale.getDefault()))
 }.getOrDefault(this)

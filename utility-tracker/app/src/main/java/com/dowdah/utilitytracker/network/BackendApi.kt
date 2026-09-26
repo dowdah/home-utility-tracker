@@ -8,6 +8,7 @@ import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.POST
 import retrofit2.http.Streaming
+import retrofit2.http.Path
 import okhttp3.ResponseBody
 
 @Serializable
@@ -33,6 +34,8 @@ data class MetaResponse(
     @SerialName("backend_instance_id") val backendInstanceId: String,
     @SerialName("current_revision") val currentRevision: Long,
     val meters: List<MeterDto>,
+    @SerialName("sync_protocol_version") val syncProtocolVersion: Int = 1,
+    @SerialName("min_sync_protocol_version") val minSyncProtocolVersion: Int = 1,
 )
 
 @Serializable
@@ -43,6 +46,8 @@ data class MutationDto(
     val kind: String,
     @SerialName("base_revision") val baseRevision: Long,
     val payload: JsonElement,
+    @SerialName("group_id") val groupId: String? = null,
+    @SerialName("group_size") val groupSize: Int? = null,
 )
 
 @Serializable
@@ -52,6 +57,7 @@ data class SyncRequestDto(
     @SerialName("device_id") val deviceId: String,
     val mutations: List<MutationDto>,
     @SerialName("pull_limit") val pullLimit: Int = 500,
+    @SerialName("client_protocol_version") val clientProtocolVersion: Int = 2,
 )
 
 @Serializable
@@ -67,6 +73,10 @@ data class EntityDto(
     @SerialName("price_decimal") val priceDecimal: String? = null,
     val currency: String? = null,
     @SerialName("effective_from") val effectiveFrom: String? = null,
+    @SerialName("amount_decimal") val amountDecimal: String? = null,
+    @SerialName("unit_price_decimal") val unitPriceDecimal: String? = null,
+    @SerialName("quantity_decimal") val quantityDecimal: String? = null,
+    @SerialName("credited_at") val creditedAt: String? = null,
 )
 
 @Serializable
@@ -93,5 +103,6 @@ interface BackendApi {
     @GET("healthz") suspend fun health(): HealthResponse
     @GET("api/v1/meta") suspend fun meta(): MetaResponse
     @POST("api/v1/sync") suspend fun sync(@Body request: SyncRequestDto): SyncResponseDto
-    @Streaming @GET("api/v1/exports/readings.csv") suspend fun exportReadings(): ResponseBody
+    @GET("api/v1/status") suspend fun status(): JsonObject
+    @Streaming @GET("api/v1/exports/{kind}.csv") suspend fun exportLedger(@Path("kind") kind: String): ResponseBody
 }

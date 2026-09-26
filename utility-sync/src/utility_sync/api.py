@@ -115,12 +115,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return result
 
-    @app.get("/api/v1/exports/readings.csv")
-    async def export_readings(
-        _: Principal = Depends(requires("sync:read")),
-    ) -> FileResponse:
-        path: Path = service.generate_csv()
-        return FileResponse(path, media_type="text/csv", filename="readings.csv")
+    @app.get("/api/v1/status")
+    def status(_: Principal = Depends(requires("sync:read"))) -> dict[str, object]:
+        return service.status()
+
+    @app.get("/api/v1/exports/{kind}.csv")
+    def export_ledger(kind: str, _: Principal = Depends(requires("sync:read"))) -> FileResponse:
+        path: Path = service.generate_csv(kind)
+        return FileResponse(path, media_type="text/csv", filename=f"{kind}.csv")
 
     return app
 

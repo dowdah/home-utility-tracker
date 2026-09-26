@@ -10,10 +10,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Database(
     entities = [
-        EndpointEntity::class, MeterEntity::class, ReadingEntity::class, TariffEntity::class,
+        EndpointEntity::class, MeterEntity::class, ReadingEntity::class, TariffEntity::class, RechargeEntity::class,
         OutboxEntity::class, ConflictEntity::class, SyncStateEntity::class,
     ],
-    version = 1,
+    version = 2,
     exportSchema = true,
 )
 abstract class UtilityDatabase : RoomDatabase() {
@@ -21,6 +21,7 @@ abstract class UtilityDatabase : RoomDatabase() {
     abstract fun meterDao(): MeterDao
     abstract fun readingDao(): ReadingDao
     abstract fun tariffDao(): TariffDao
+    abstract fun rechargeDao(): RechargeDao
     abstract fun outboxDao(): OutboxDao
     abstract fun conflictDao(): ConflictDao
     abstract fun syncStateDao(): SyncStateDao
@@ -88,6 +89,11 @@ interface TariffDao {
 
 @Dao
 interface OutboxDao {
+    @Query("SELECT * FROM outbox ORDER BY rowid") suspend fun all(): List<OutboxEntity>
+    @Query("SELECT * FROM outbox WHERE entityType=:type AND entityId=:id ORDER BY rowid") suspend fun forEntity(type: String, id: String): List<OutboxEntity>
+    @Query("UPDATE outbox SET previousOperationId=NULL, baseRevision=:revision WHERE previousOperationId=:operation") suspend fun acknowledge(operation: String, revision: Long)
+    @Query("UPDATE outbox SET attemptCount=attemptCount+1 WHERE operationId IN (:ids)") suspend fun markSent(ids: List<String>)
+
     @Query("SELECT * FROM outbox ORDER BY createdAt LIMIT :limit") suspend fun next(limit: Int): List<OutboxEntity>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: OutboxEntity)
     @Query("DELETE FROM outbox WHERE operationId = :operationId") suspend fun delete(operationId: String)
@@ -97,6 +103,9 @@ interface OutboxDao {
 
 @Dao
 interface ConflictDao {
+    @Query("SELECT * FROM conflicts ORDER BY createdAt") suspend fun all(): List<ConflictEntity>
+    @Query("SELECT * FROM conflicts WHERE entityType=:type AND entityId=:id LIMIT 1") suspend fun forEntity(type: String, id: String): ConflictEntity?
+
     @Query("SELECT * FROM conflicts ORDER BY createdAt DESC") fun observeAll(): Flow<List<ConflictEntity>>
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: ConflictEntity)
     @Query("DELETE FROM conflicts WHERE operationId = :operationId") suspend fun delete(operationId: String)
@@ -108,4 +117,12 @@ interface SyncStateDao {
     @Query("SELECT * FROM sync_state WHERE id = 0") fun observe(): Flow<SyncStateEntity?>
     @Query("SELECT * FROM sync_state WHERE id = 0") suspend fun current(): SyncStateEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(state: SyncStateEntity)
+}
+
+@Dao
+interface RechargeDao {
+    @Query("SELECT * FROM recharges WHERE deleted = 0 ORDER BY creditedAt DESC") fun observeActive(): Flow<List<RechargeEntity>>
+    @Query("SELECT * FROM recharges WHERE id = :id") suspend fun byId(id: String): RechargeEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: RechargeEntity)
+    @Query("DELETE FROM recharges WHERE id = :id") suspend fun delete(id: String)
 }

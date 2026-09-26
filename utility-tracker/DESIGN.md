@@ -24,3 +24,11 @@ Utility Tracker is a private, local-first household meter log. Its primary job i
 - Unknown consumption or cost uses an em dash with a localized reason. A known subtotal is labeled incomplete; a tariff-change estimate is labeled estimated.
 - An increasing balance can mean a top-up or input error. It must not become a negative consumption or an apparently complete zero bill.
 - Statistics scroll naturally in portrait and landscape; tariff recovery uses the existing tariff-history route.
+
+## Recharge presentation
+
+The approved expansion keeps the existing Material 3 theme, typography and spacing. `ui/theme/Theme.kt` remains the runtime color/type owner; `values-land/dimens.xml` owns orientation layout. Recharges reuse the existing meter selector, date/time picker, confirmation and overflow controls. Do not add a second form/navigation system.
+
+Consumption and recharge spending are separate labeled values. Month and custom consumption charts place complete interval averages at the later reading date and connect known points as a trend; the line is not measured daily use. Year consumption uses bars for month buckets. Every meter also has a daily remaining chart: the day's last reading is measured, while other days are marked estimates between bounding readings; gaps and recharge markers stay visible. Both charts have selectable text details. Unknown values are gaps rather than zero lines; partial totals retain their warning. All new content has English and Chinese resources.
+
+Behavior drift addressed: save failures now preserve the form; the dashboard reads persisted background-sync state instead of only transient messages. No palette or theme change is intended.

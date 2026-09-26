@@ -11,14 +11,17 @@ UuidText = Annotated[
 
 class Mutation(BaseModel):
     operation_id: UuidText
-    entity_type: Literal["reading", "tariff"]
+    entity_type: Literal["reading", "tariff", "recharge"]
     entity_id: UuidText
     kind: Literal["upsert", "tombstone"]
     base_revision: int = Field(ge=0)
     payload: dict[str, Any] = Field(default_factory=dict)
+    group_id: UuidText | None = None
+    group_size: int | None = Field(default=None, ge=2, le=100)
 
 
 class SyncRequest(BaseModel):
+    client_protocol_version: int = 1
     backend_instance_id: UuidText
     cursor_revision: int = Field(ge=0)
     device_id: UuidText

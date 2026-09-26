@@ -40,3 +40,15 @@ For the production ECS reverse-SSH topology, install `ops/utility-sync-tunnel.se
 ## Contributing
 
 Keep API, schema, migration, and test changes aligned. Run the verification commands above before opening a pull request, and never commit service tokens, private environment files, exports, or backup data.
+
+## Recharge protocol (schema 0002)
+
+Clients must send `client_protocol_version: 2` to `/api/v1/sync`; older requests receive 426 without advancing a cursor. `/meta` advertises the minimum protocol and recharge/group features. Upgrade all clients before using recharge accounting.
+
+A `recharge` mutation carries `meter_id`, positive decimal-string `amount_decimal` and `unit_price_decimal`, `quantity_decimal` (amount / price, scale 12, HALF_EVEN), `currency=CNY`, UTC `credited_at`, and optional `note`. Amount and purchase price are historical snapshots. A recharge and optional post-credit electricity reading share `group_id` and `group_size=2`; submit all members together, including on retries. Group members cannot be changed after submission.
+
+`batch_aborted` operations remain queued with their original IDs. A real conflict is replayed as `conflict`, never a successful duplicate. `group_conflict` requires one decision for the entire group. Accepted retries return `duplicate`. Operation IDs cannot be reused with different content.
+
+Existing readings CSV columns are unchanged; `/api/v1/exports/recharges.csv` and `/api/v1/exports/tariffs.csv` add the remaining ledger. Authenticated `/api/v1/status` exposes disk, backup and monitor alerts. Public `/healthz` exposes only service/database/write readiness. Install the monitor service/timer to check every five minutes; backup age over 36 hours is actionable. No external notifications are sent.
+
+Schema upgrades preserve meters, instance identity, tokens, readings, tariffs, operation history and revisions. Take and restore-verify a backup before upgrade. After new writes, do not roll back by restoring an older database: retain current data and forward-fix.

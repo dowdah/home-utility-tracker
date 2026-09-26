@@ -33,6 +33,7 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--database", help="override UTILITY_SYNC_DATABASE for this invocation")
     subcommands = result.add_subparsers(dest="command", required=True)
+    subcommands.add_parser("monitor", help="publish local service, disk and backup status")
     subcommands.add_parser("migrate", help="apply schema migrations")
     issue = subcommands.add_parser(
         "issue-token", help="create a device token; print it exactly once"
@@ -61,7 +62,11 @@ def main(argv: list[str] | None = None) -> None:
             _migrate(settings)
             return
         service = SyncService(settings)
-        if args.command == "issue-token":
+        if args.command == "monitor":
+            from .monitor import run_monitor
+
+            print(run_monitor(service))
+        elif args.command == "issue-token":
             print(issue_token(service.database, {"sync:read"} if args.read_only else None))
         elif args.command == "revoke-token":
             if not revoke_token(service.database, args.token_id):

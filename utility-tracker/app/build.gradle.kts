@@ -17,19 +17,27 @@ android {
         applicationId = "com.dowdah.utilitytracker"
         minSdk = 35
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testInstrumentationRunnerArguments["size"] = "medium"
     }
 
     buildTypes {
+        create("acceptance") {
+            initWith(getByName("debug"))
+            applicationIdSuffix = providers.gradleProperty("acceptanceSuffix").getOrElse(".acceptance")
+            matchingFallbacks += listOf("debug")
+        }
         release {
             optimization {
                 enable = false
             }
         }
     }
+    sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+    testBuildType = "acceptance"
     buildFeatures {
         compose = true
         buildConfig = true
@@ -69,6 +77,20 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.retrofit.kotlinx.serialization)
     testImplementation(libs.junit)
+    androidTestImplementation("androidx.room:room-testing:2.8.3")
+    androidTestImplementation("androidx.test.uiautomator:uiautomator:2.3.0")
+    androidTestImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    androidTestImplementation(platform(libs.androidx.compose.bom))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    add("acceptanceImplementation", "androidx.compose.ui:ui-test-manifest")
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+}
+
+kapt { arguments { arg("room.schemaLocation", "$projectDir/schemas") } }
+
+// Never let a connected test invocation silently select every attached personal device.
+if (gradle.startParameter.taskNames.any { it.contains("connected", ignoreCase = true) } &&
+    providers.environmentVariable("ANDROID_SERIAL").orNull.isNullOrBlank()) {
+    throw GradleException("Set ANDROID_SERIAL explicitly before running connected device tests")
 }

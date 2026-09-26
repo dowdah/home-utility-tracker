@@ -5,11 +5,12 @@ import hashlib
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 from contextlib import closing
 from datetime import UTC, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_EVEN, Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from tempfile import NamedTemporaryFile
 from typing import Any
@@ -38,8 +39,13 @@ def _canonical_decimal(value: Any, field: str) -> str:
         raise ServiceError(422, f"{field} must be a decimal string") from error
     if not number.is_finite() or number < 0:
         raise ServiceError(422, f"{field} must be a non-negative finite decimal")
-    normalized = number.normalize()
-    return format(normalized, "f") if normalized else "0"
+    if len(value) > 128 or number.adjusted() > 24 or number.as_tuple().exponent < -24:
+        raise ServiceError(422, f"{field} exceeds supported precision")
+    return (
+        format(number, "f").rstrip("0").rstrip(".")
+        if "." in format(number, "f")
+        else format(number, "f")
+    )
 
 
 def _utc_timestamp(value: Any, field: str) -> str:
@@ -75,16 +81,16 @@ class SyncService:
         with self.database.read() as connection:
             connection.execute("SELECT 1").fetchone()
         free_bytes = self._free_bytes(self.settings.data_dir)
-        backup_free_bytes = self._free_bytes(self.settings.backups_dir)
         return {
             "status": "ok",
             "database": "open",
-            "free_bytes": free_bytes,
             "writes_enabled": free_bytes >= self.settings.write_min_free_bytes,
-            "backup_free_bytes": backup_free_bytes,
-            "backup_budget_bytes": self.settings.backup_max_bytes,
-            "published_backup_bytes": self._published_backup_bytes(),
         }
+
+    def status(self) -> dict[str, Any]:
+        from .monitor import read_status
+
+        return read_status(self)
 
     def meta(self) -> dict[str, Any]:
         with self.database.read() as connection:
@@ -96,9 +102,17 @@ class SyncService:
         return {
             "backend_instance_id": metadata["backend_instance_id"],
             "api_version": "v1",
-            "schema_version": "0001_initial",
+            "schema_version": "0002_recharges",
+            "sync_protocol_version": 2,
+            "min_sync_protocol_version": 2,
             "current_revision": int(metadata["global_revision"]),
-            "features": {"tombstones": True, "csv_export": True, "currency": "CNY"},
+            "features": {
+                "tombstones": True,
+                "csv_export": True,
+                "currency": "CNY",
+                "recharges": True,
+                "atomic_groups": True,
+            },
             "meters": meters,
         }
 
@@ -106,7 +120,7 @@ class SyncService:
     def _entity(
         connection: sqlite3.Connection, entity_type: str, entity_id: str
     ) -> dict[str, Any] | None:
-        table = "readings" if entity_type == "reading" else "tariffs"
+        table = {"reading": "readings", "tariff": "tariffs", "recharge": "recharges"}[entity_type]
         row = connection.execute(f"SELECT * FROM {table} WHERE id = ?", (entity_id,)).fetchone()
         return _row_dict(row) if row else None
 
@@ -140,6 +154,38 @@ class SyncService:
                 "recorded_at": _utc_timestamp(payload.get("recorded_at"), "recorded_at"),
                 "note": note,
             }
+        if mutation.entity_type == "recharge":
+            amount = _canonical_decimal(payload.get("amount_decimal"), "amount_decimal")
+            price = _canonical_decimal(payload.get("unit_price_decimal"), "unit_price_decimal")
+            if Decimal(amount) <= 0 or Decimal(price) <= 0:
+                raise ServiceError(422, "recharge amount and purchase price must be positive")
+            with localcontext() as context:
+                context.prec = 80
+                quantity = (Decimal(amount) / Decimal(price)).quantize(
+                    Decimal("0.000000000001"), rounding=ROUND_HALF_EVEN
+                )
+            if quantity <= 0 or quantity.adjusted() > 24:
+                raise ServiceError(422, "credited quantity exceeds supported precision")
+            credited = _canonical_decimal(payload.get("quantity_decimal"), "quantity_decimal")
+            if Decimal(credited) != quantity:
+                raise ServiceError(
+                    422,
+                    "credited quantity must equal amount / price rounded to 12 places HALF_EVEN",
+                )
+            note = payload.get("note")
+            if note is not None and (not isinstance(note, str) or len(note) > 1000):
+                raise ServiceError(422, "note must be a string no longer than 1000 characters")
+            if payload.get("currency", "CNY") != "CNY":
+                raise ServiceError(422, "currency must be CNY")
+            return dict(
+                meter_id=meter_id,
+                amount_decimal=amount,
+                unit_price_decimal=price,
+                quantity_decimal=credited,
+                currency="CNY",
+                credited_at=_utc_timestamp(payload.get("credited_at"), "credited_at"),
+                note=note,
+            )
         currency = payload.get("currency", "CNY")
         if currency != "CNY":
             raise ServiceError(422, "currency must be CNY")
@@ -171,56 +217,42 @@ class SyncService:
         existing = self._entity(connection, mutation.entity_type, mutation.entity_id)
         now = now_utc()
         revision = self._next_revision(connection)
-        table = "readings" if mutation.entity_type == "reading" else "tariffs"
+        table = {"reading": "readings", "tariff": "tariffs", "recharge": "recharges"}[
+            mutation.entity_type
+        ]
         if mutation.kind == "tombstone":
             assert existing is not None
             connection.execute(
                 f"UPDATE {table} SET deleted = 1, updated_at = ?, server_revision = ?, updated_by_device_id = ? WHERE id = ?",
                 (now, revision, device_id, mutation.entity_id),
             )
-        elif mutation.entity_type == "reading":
-            created_at = existing["created_at"] if existing else now
-            connection.execute(
-                """
-                INSERT INTO readings(id, meter_id, value_decimal, recorded_at, note, deleted, created_at, updated_at, server_revision, updated_by_device_id)
-                VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET meter_id=excluded.meter_id, value_decimal=excluded.value_decimal,
-                  recorded_at=excluded.recorded_at, note=excluded.note, deleted=0, updated_at=excluded.updated_at,
-                  server_revision=excluded.server_revision, updated_by_device_id=excluded.updated_by_device_id
-                """,
-                (
-                    mutation.entity_id,
-                    payload["meter_id"],
-                    payload["value_decimal"],
-                    payload["recorded_at"],
-                    payload["note"],
-                    created_at,
-                    now,
-                    revision,
-                    device_id,
-                ),
-            )
         else:
-            created_at = existing["created_at"] if existing else now
+            # Payload names come only from the validated, closed entity schema above.
+            fields = [
+                "id",
+                *payload,
+                "deleted",
+                "created_at",
+                "updated_at",
+                "server_revision",
+                "updated_by_device_id",
+            ]
+            values = [
+                mutation.entity_id,
+                *payload.values(),
+                0,
+                existing["created_at"] if existing else now,
+                now,
+                revision,
+                device_id,
+            ]
+            assignments = ",".join(
+                f"{name}=excluded.{name}" for name in fields if name not in ("id", "created_at")
+            )
             connection.execute(
-                """
-                INSERT INTO tariffs(id, meter_id, price_decimal, currency, effective_from, deleted, created_at, updated_at, server_revision, updated_by_device_id)
-                VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?)
-                ON CONFLICT(id) DO UPDATE SET meter_id=excluded.meter_id, price_decimal=excluded.price_decimal,
-                  currency=excluded.currency, effective_from=excluded.effective_from, deleted=0, updated_at=excluded.updated_at,
-                  server_revision=excluded.server_revision, updated_by_device_id=excluded.updated_by_device_id
-                """,
-                (
-                    mutation.entity_id,
-                    payload["meter_id"],
-                    payload["price_decimal"],
-                    payload["currency"],
-                    payload["effective_from"],
-                    created_at,
-                    now,
-                    revision,
-                    device_id,
-                ),
+                f"INSERT INTO {table} ({','.join(fields)}) VALUES ({','.join('?' for _ in fields)}) "
+                f"ON CONFLICT(id) DO UPDATE SET {assignments}",
+                values,
             )
         entity = self._entity(connection, mutation.entity_type, mutation.entity_id)
         assert entity is not None
@@ -250,6 +282,8 @@ class SyncService:
         )
 
     def sync(self, request: SyncRequest) -> dict[str, Any]:
+        if request.client_protocol_version != 2:
+            raise ServiceError(426, "client_upgrade_required: sync protocol 2 is required")
         if (
             self._free_bytes(self.settings.data_dir) < self.settings.write_min_free_bytes
             and request.mutations
@@ -259,106 +293,148 @@ class SyncService:
                 "writes are disabled because available disk space is below the safety threshold",
             )
         with self.database.write() as connection:
-            backend_id = connection.execute(
-                "SELECT value FROM metadata WHERE key = 'backend_instance_id'"
-            ).fetchone()["value"]
-            if request.backend_instance_id != backend_id:
+            metadata = dict(connection.execute("SELECT key, value FROM metadata"))
+            if request.backend_instance_id != metadata["backend_instance_id"]:
                 raise ServiceError(409, "backend_instance_id does not match this server")
-            results: list[dict[str, Any]] = []
-            fresh: list[tuple[Mutation, dict[str, Any]]] = []
-            conflicts: list[dict[str, Any]] = []
-            operation_ids: set[str] = set()
-            for mutation in request.mutations:
-                if mutation.operation_id in operation_ids:
-                    raise ServiceError(422, "operation_id may appear only once per request")
-                operation_ids.add(mutation.operation_id)
+            if request.cursor_revision > int(metadata["global_revision"]):
+                raise ServiceError(409, "cursor is ahead of server; recovery is required")
+            operations = {item.operation_id: item for item in request.mutations}
+            if len(operations) != len(request.mutations):
+                raise ServiceError(422, "operation_id may appear only once per request")
+            identities = {(item.entity_type, item.entity_id) for item in request.mutations}
+            if len(identities) != len(request.mutations):
+                raise ServiceError(422, "send only one operation per entity per request")
+            groups: dict[str, list[Mutation]] = {}
+            for item in request.mutations:
+                if (item.group_id is None) != (item.group_size is None):
+                    raise ServiceError(422, "group_id and group_size must be supplied together")
+                if item.group_id:
+                    groups.setdefault(item.group_id, []).append(item)
+            for group_id, members in groups.items():
+                if any(item.group_size != len(members) for item in members):
+                    raise ServiceError(422, "atomic group must be submitted in full")
+                manifest = json.dumps(sorted(item.operation_id for item in members))
+                previous = connection.execute(
+                    "SELECT members_json FROM atomic_groups WHERE id=?", (group_id,)
+                ).fetchone()
+                if previous and previous[0] != manifest:
+                    raise ServiceError(422, "atomic group membership is immutable")
+                connection.execute(
+                    "INSERT OR IGNORE INTO atomic_groups VALUES (?, ?)", (group_id, manifest)
+                )
+            results: dict[str, dict[str, Any]] = {}
+            fresh: dict[str, tuple[Mutation, dict[str, Any], str]] = {}
+            conflicts: set[str] = set()
+            for item in request.mutations:
+                fingerprint = hashlib.sha256(item.model_dump_json().encode()).hexdigest()
                 saved = connection.execute(
-                    "SELECT result_json FROM operations WHERE operation_id = ?",
-                    (mutation.operation_id,),
+                    "SELECT result_json, request_hash FROM operations WHERE operation_id=?",
+                    (item.operation_id,),
                 ).fetchone()
                 if saved:
-                    duplicate = json.loads(saved["result_json"])
-                    duplicate["status"] = "duplicate"
-                    results.append(duplicate)
+                    if saved["request_hash"] and saved["request_hash"] != fingerprint:
+                        raise ServiceError(
+                            422, "operation_id cannot be reused with different content"
+                        )
+                    result = json.loads(saved["result_json"])
+                    result["replayed"] = True
+                    if result["status"] == "accepted":
+                        result["status"] = "duplicate"
+                    else:
+                        conflicts.add(item.operation_id)
+                    results[item.operation_id] = result
                     continue
-                existing = self._entity(connection, mutation.entity_type, mutation.entity_id)
-                current_revision = existing["server_revision"] if existing else 0
-                if current_revision != mutation.base_revision:
-                    conflicts.append(
-                        {
-                            "operation_id": mutation.operation_id,
-                            "status": "conflict",
-                            "entity": {"entity_type": mutation.entity_type, **existing}
-                            if existing
-                            else None,
-                        }
+                entity = self._entity(connection, item.entity_type, item.entity_id)
+                if (entity["server_revision"] if entity else 0) != item.base_revision:
+                    conflicts.add(item.operation_id)
+                    results[item.operation_id] = dict(
+                        operation_id=item.operation_id,
+                        status="conflict",
+                        entity={"entity_type": item.entity_type, **entity} if entity else None,
+                    )
+                    fresh[item.operation_id] = (item, {}, fingerprint)
+                else:
+                    if item.kind == "tombstone" and entity is None:
+                        raise ServiceError(422, "cannot tombstone an entity that does not exist")
+                    fresh[item.operation_id] = (
+                        item,
+                        self._validate_mutation(connection, item),
+                        fingerprint,
+                    )
+            # A linked recharge/reading must remain one decision, including conflict recovery.
+            for members in groups.values():
+                if any(item.operation_id in conflicts for item in members):
+                    for item in members:
+                        if item.operation_id not in conflicts:
+                            entity = self._entity(connection, item.entity_type, item.entity_id)
+                            results[item.operation_id] = dict(
+                                operation_id=item.operation_id,
+                                status="conflict",
+                                reason="group_conflict",
+                                entity={"entity_type": item.entity_type, **entity}
+                                if entity
+                                else None,
+                            )
+                            conflicts.add(item.operation_id)
+            for operation_id, (item, payload, fingerprint) in fresh.items():
+                if operation_id in conflicts:
+                    result = results[operation_id]
+                elif conflicts:
+                    results[operation_id] = dict(
+                        operation_id=operation_id,
+                        status="conflict",
+                        reason="batch_aborted",
+                        entity=None,
                     )
                     continue
-                if mutation.kind == "tombstone" and existing is None:
-                    raise ServiceError(422, "cannot tombstone an entity that does not exist")
-                fresh.append((mutation, self._validate_mutation(connection, mutation)))
-            if conflicts:
-                for conflict in conflicts:
-                    self._save_operation(connection, conflict)
-                results.extend(conflicts)
-                results.extend(
-                    {
-                        "operation_id": mutation.operation_id,
-                        "status": "conflict",
-                        "reason": "batch_aborted",
-                        "entity": None,
-                    }
-                    for mutation, _ in fresh
+                else:
+                    result = self._apply(connection, item, payload, request.device_id)
+                    results[operation_id] = result
+                self._save_operation(connection, result)
+                connection.execute(
+                    "UPDATE operations SET request_hash=? WHERE operation_id=?",
+                    (fingerprint, operation_id),
                 )
-            else:
-                for mutation, payload in fresh:
-                    accepted = self._apply(connection, mutation, payload, request.device_id)
-                    self._save_operation(connection, accepted)
-                    results.append(accepted)
             high_water = int(
                 connection.execute(
-                    "SELECT value FROM metadata WHERE key = 'global_revision'"
-                ).fetchone()["value"]
+                    "SELECT value FROM metadata WHERE key='global_revision'"
+                ).fetchone()[0]
             )
             rows = connection.execute(
-                "SELECT revision, payload_json FROM changes WHERE revision > ? AND revision <= ? ORDER BY revision LIMIT ?",
+                "SELECT revision, payload_json FROM changes WHERE revision>? AND revision<=? ORDER BY revision LIMIT ?",
                 (request.cursor_revision, high_water, request.pull_limit),
             ).fetchall()
-            changes = [
-                {"revision": row["revision"], "entity": json.loads(row["payload_json"])}
-                for row in rows
-            ]
-            next_cursor = rows[-1]["revision"] if rows else high_water
-            return {
-                "results": results,
-                "changes": changes,
-                "next_cursor_revision": next_cursor,
-                "has_more": next_cursor < high_water,
-                "high_water_revision": high_water,
-            }
+            cursor = rows[-1]["revision"] if rows else high_water
+            return dict(
+                results=[results[item.operation_id] for item in request.mutations],
+                changes=[
+                    dict(revision=row["revision"], entity=json.loads(row["payload_json"]))
+                    for row in rows
+                ],
+                next_cursor_revision=cursor,
+                has_more=cursor < high_water,
+                high_water_revision=high_water,
+            )
 
-    def generate_csv(self) -> Path:
+    def generate_csv(self, kind: str = "readings") -> Path:
         self.settings.exports_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        target = self.settings.exports_dir / "readings.csv"
+        columns = {
+            "readings": "id,meter_id,value_decimal,recorded_at,note,deleted,server_revision",
+            "tariffs": "id,meter_id,price_decimal,currency,effective_from,deleted,server_revision",
+            "recharges": "id,meter_id,amount_decimal,unit_price_decimal,quantity_decimal,currency,credited_at,note,deleted,server_revision",
+        }
+        if kind not in columns:
+            raise ServiceError(404, "unknown export")
+        target = self.settings.exports_dir / f"{kind}.csv"
         with NamedTemporaryFile(
             "w", encoding="utf-8", newline="", dir=self.settings.exports_dir, delete=False
         ) as handle:
             temporary = Path(handle.name)
             writer = csv.writer(handle)
-            writer.writerow(
-                [
-                    "id",
-                    "meter_id",
-                    "value_decimal",
-                    "recorded_at",
-                    "note",
-                    "deleted",
-                    "server_revision",
-                ]
-            )
+            writer.writerow(columns[kind].split(","))
             with self.database.read() as connection:
                 rows = connection.execute(
-                    "SELECT id, meter_id, value_decimal, recorded_at, note, deleted, server_revision FROM readings ORDER BY recorded_at, id"
+                    f"SELECT {columns[kind]} FROM {kind} ORDER BY id"
                 ).fetchall()
             writer.writerows([tuple(row) for row in rows])
             handle.flush()
@@ -376,6 +452,9 @@ class SyncService:
             "meters": connection.execute("SELECT COUNT(*) FROM meters").fetchone()[0],
             "readings": connection.execute("SELECT COUNT(*) FROM readings").fetchone()[0],
             "tariffs": connection.execute("SELECT COUNT(*) FROM tariffs").fetchone()[0],
+            "recharges": connection.execute("SELECT COUNT(*) FROM recharges").fetchone()[0],
+            "operations": connection.execute("SELECT COUNT(*) FROM operations").fetchone()[0],
+            "tokens": connection.execute("SELECT COUNT(*) FROM tokens").fetchone()[0],
             "changes": connection.execute("SELECT COUNT(*) FROM changes").fetchone()[0],
         }
 
@@ -384,16 +463,21 @@ class SyncService:
             (
                 item
                 for item in self.settings.backups_dir.iterdir()
-                if item.is_file() and item.name.startswith("utility-") and item.suffix == ".sqlite3"
+                if item.is_file() and re.fullmatch(r"utility-\d{8}T\d{12}Z\.sqlite3", item.name)
             ),
             reverse=True,
         )
 
     @staticmethod
     def _retention_removals(backups: list[Path]) -> list[Path]:
-        keep: set[Path] = set(backups[:14])
+        keep: set[Path] = set()
+        days: set[str] = set()
         months: set[str] = set()
-        for backup in backups:
+        for backup in sorted(backups, reverse=True):
+            day = backup.name[8:16]
+            if day not in days and len(days) < 14:
+                keep.add(backup)
+                days.add(day)
             month = backup.name[8:14]
             if month not in months and len(months) < 12:
                 keep.add(backup)

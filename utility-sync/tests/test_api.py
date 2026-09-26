@@ -27,6 +27,7 @@ def sync_payload(
         "/api/v1/sync",
         headers=headers,
         json={
+            "client_protocol_version": 2,
             "backend_instance_id": backend_id,
             "cursor_revision": cursor,
             "device_id": str(uuid.uuid4()),
@@ -131,6 +132,7 @@ def test_tombstone_paging_validation_csv_and_backup(
         "/api/v1/sync",
         headers=headers,
         json={
+            "client_protocol_version": 2,
             "backend_instance_id": backend_id,
             "cursor_revision": 0,
             "device_id": str(uuid.uuid4()),
@@ -195,6 +197,7 @@ def test_tariff_low_space_and_request_id(
             "/api/v1/sync",
             headers=constrained_headers,
             json={
+                "client_protocol_version": 2,
                 "backend_instance_id": backend_id,
                 "cursor_revision": 0,
                 "device_id": str(uuid.uuid4()),
