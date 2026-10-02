@@ -109,6 +109,14 @@
     <string name="month_mode">Month</string>
     <string name="year_mode">Year</string>
     <string name="custom_mode">Custom</string>
+    <string name="last_30_days">Last 30 days</string>
+    <string name="last_183_days">Last 183 days</string>
+    <string name="all_time_mode">All time</string>
+    <string name="statistics_range_now">%1$s – %2$s (up to now)</string>
+    <string name="statistics_no_history">No history yet</string>
+    <string name="statistics_calculating">Calculating statistics…</string>
+    <string name="interval_show_values">Show reading intervals</string>
+    <string name="interval_hide_values">Hide reading intervals</string>
     <string name="previous_period">Previous period</string>
     <string name="next_period">Next period</string>
     <string name="monthly_summary">This month</string>

@@ -12,6 +12,7 @@ import com.dowdah.utilitytracker.data.EndpointEntity
 import com.dowdah.utilitytracker.data.SyncResult
 import com.dowdah.utilitytracker.data.ExportRequest
 import com.dowdah.utilitytracker.data.defaultReadingMeterId
+import com.dowdah.utilitytracker.data.StatisticsMode
 import com.dowdah.utilitytracker.sync.SyncScheduler
 import java.time.Instant
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -57,10 +58,10 @@ class AppViewModel @Inject constructor(
     var rechargeTab: Boolean
         get() = rechargeTabState.value
         set(value) { rechargeTabState.value = value; savedState["rechargeTab"] = value }
-    private val statisticsModeState = mutableStateOf(savedState["statisticsMode"] ?: "month")
+    private val statisticsModeState = mutableStateOf(StatisticsMode.fromKey(savedState["statisticsMode"] ?: "month").key)
     var statisticsMode: String
         get() = statisticsModeState.value
-        set(value) { statisticsModeState.value = value; savedState["statisticsMode"] = value }
+        set(value) { statisticsModeState.value = StatisticsMode.fromKey(value).key; savedState["statisticsMode"] = statisticsModeState.value }
     private val statisticsAnchorState = mutableStateOf(savedState["statisticsAnchor"] ?: java.time.LocalDate.now().toString())
     var statisticsAnchor: String
         get() = statisticsAnchorState.value
@@ -177,6 +178,18 @@ class AppViewModel @Inject constructor(
     var statisticsEnd: String?
         get() = statisticsEndState.value
         set(value) { statisticsEndState.value = value; savedState["statisticsEnd"] = value }
+
+    fun selectStatisticsMode(value: String) {
+        if (value == StatisticsMode.CUSTOM.key) rangePickerOpen = true else statisticsMode = value
+    }
+
+    fun applyStatisticsDates(start: java.time.LocalDate, end: java.time.LocalDate, zone: java.time.ZoneId) {
+        require(end >= start)
+        statisticsStart = start.atStartOfDay(zone).toInstant().toString()
+        statisticsEnd = end.plusDays(1).atStartOfDay(zone).toInstant().minusNanos(1).toString()
+        statisticsMode = StatisticsMode.CUSTOM.key
+        rangePickerOpen = false
+    }
 
     fun saveReading(id: String? = null, meterId: String, value: String, recordedAt: String, note: String?) = viewModelScope.launch {
         runCatching { repository.saveReading(id, meterId, value, recordedAt, note) }

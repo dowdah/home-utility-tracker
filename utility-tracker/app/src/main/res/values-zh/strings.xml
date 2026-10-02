@@ -110,6 +110,14 @@
     <string name="month_mode">月</string>
     <string name="year_mode">年</string>
     <string name="custom_mode">自定义</string>
+    <string name="last_30_days">近30天</string>
+    <string name="last_183_days">近183天</string>
+    <string name="all_time_mode">有史以来</string>
+    <string name="statistics_range_now">%1$s – %2$s（截至当前）</string>
+    <string name="statistics_no_history">暂无历史记录</string>
+    <string name="statistics_calculating">正在计算统计…</string>
+    <string name="interval_show_values">查看抄表区间</string>
+    <string name="interval_hide_values">收起抄表区间</string>
     <string name="previous_period">上一期</string>
     <string name="next_period">下一期</string>
     <string name="monthly_summary">本月汇总</string>
