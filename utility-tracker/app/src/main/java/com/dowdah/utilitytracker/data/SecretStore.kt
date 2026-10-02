@@ -5,7 +5,8 @@ import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.nio.ByteBuffer
+import android.util.AtomicFile
+import java.io.File
 import java.security.KeyStore
 import java.util.UUID
 import javax.crypto.Cipher
@@ -16,10 +17,12 @@ import javax.inject.Singleton
 
 /** Stores the API token encrypted with a non-exportable Android Keystore key. */
 @Singleton
-class SecretStore @Inject constructor(@ApplicationContext context: Context) {
+class SecretStore @Inject constructor(@ApplicationContext private val context: Context) {
     private val preferences = context.getSharedPreferences("utility_tracker_secrets", Context.MODE_PRIVATE)
 
-    fun token(): String? = preferences.getString(TOKEN, null)?.let(::decrypt)
+    fun token(): String? = preferences.getString(TOKEN, null)?.let { encrypted ->
+        decrypt(encrypted).also { if (it == null) preferences.edit().remove(TOKEN).commit() }
+    }
 
     fun saveToken(token: String) {
         preferences.edit().putString(TOKEN, encrypt(token)).apply()
@@ -29,12 +32,27 @@ class SecretStore @Inject constructor(@ApplicationContext context: Context) {
         preferences.edit().remove(TOKEN).apply()
     }
 
-    fun installationId(): String = preferences.getString(INSTALLATION_ID, null)
-        ?: UUID.randomUUID().toString().also { preferences.edit().putString(INSTALLATION_ID, it).apply() }
+    @Synchronized
+    fun installationId(): String {
+        val file = AtomicFile(File(context.noBackupFilesDir, INSTALLATION_FILE))
+        if (file.baseFile.exists()) return file.readFully().toString(Charsets.UTF_8)
+        // Only a working legacy key proves this is an ordinary upgrade, rather than
+        // old shared preferences restored on a new installation.
+        val legacy = preferences.getString(INSTALLATION_ID, null)
+            ?.takeIf { existingKey() != null }
+        val id = legacy ?: UUID.randomUUID().toString()
+        val stream = file.startWrite()
+        try { stream.write(id.toByteArray(Charsets.UTF_8)); file.finishWrite(stream) }
+        catch (error: Exception) { file.failWrite(stream); throw error }
+        preferences.edit().remove(INSTALLATION_ID).commit()
+        return id
+    }
+
+    private fun existingKey(): SecretKey? =
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.getKey(KEY_ALIAS, null) as? SecretKey
 
     private fun key(): SecretKey {
-        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (store.getKey(KEY_ALIAS, null) as? SecretKey)?.let { return it }
+        existingKey()?.let { return it }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
             init(
                 KeyGenParameterSpec.Builder(
@@ -56,7 +74,7 @@ class SecretStore @Inject constructor(@ApplicationContext context: Context) {
     private fun decrypt(value: String): String? = runCatching {
         val all = Base64.decode(value, Base64.NO_WRAP)
         val iv = all.copyOfRange(0, 12)
-        Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, key(), javax.crypto.spec.GCMParameterSpec(128, iv)) }
+        Cipher.getInstance("AES/GCM/NoPadding").apply { init(Cipher.DECRYPT_MODE, requireNotNull(existingKey()), javax.crypto.spec.GCMParameterSpec(128, iv)) }
             .doFinal(all.copyOfRange(12, all.size)).toString(Charsets.UTF_8)
     }.getOrNull()
 
@@ -64,5 +82,6 @@ class SecretStore @Inject constructor(@ApplicationContext context: Context) {
         const val TOKEN = "token"
         const val KEY_ALIAS = "utility_tracker_token_key"
         const val INSTALLATION_ID = "installation_id"
+        const val INSTALLATION_FILE = "installation-id"
     }
 }

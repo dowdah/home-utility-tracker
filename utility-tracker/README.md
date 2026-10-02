@@ -53,3 +53,17 @@ Production acceptance additionally requires explicit `--mode production --endpoi
 `tools/deploy_backend.py` stages a committed backend revision, rehearses additive migration on an online SQLite copy, preserves original-row hashes and old source, and verifies backup/monitor tasks. Read its arguments and the acceptance report before using it on a live host. After new writes, rollback must preserve the current ledger and prefer a forward fix.
 
 KAPT compatibility flags remain intentionally unchanged; migrating the build toolchain is a separate task. Never commit tokens, private device databases, exported personal ledgers or production credentials.
+
+## Android backup and restore (1.2)
+
+Cloud backup is permitted only when the Android transport has client-side encryption. Device-to-device transfer is also supported. Both use an explicit allowlist containing only `utility-tracker.db`: ledger rows, endpoints, backend identity/cursor, pending operation chains and conflicts are retained. The backup agent completes a WAL checkpoint and closes its connection before framework backup; a failed checkpoint aborts the backup. Tokens, the per-installation identity, WorkManager data, cache and logs are excluded.
+
+A normal signed APK upgrade retains the token and migrates the existing installation identity into `noBackupFilesDir`. Restore removes historical credential preferences too, creates a new installation identity and clears cached health/success information. Re-enter a token for the same backend to resume the retained queue. Operation IDs and linked groups are never regenerated during restore.
+
+For local transport acceptance (emulated encryption/D2D flags, not a Google cloud upload):
+
+```sh
+utility-sync/.venv/bin/python tools/backup_acceptance.py --serial emulator-5554
+```
+
+Run this from the repository root. It builds a separate `.acceptancebackup` package, exercises upgrade and actual `bmgr` backup/restore, and restores the AVD's transport, enabled state and transport parameters even after failure. Only this isolated package and its own backup are cleared.
