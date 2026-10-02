@@ -9,7 +9,7 @@ Home Utility Tracker is a household utility-meter recording and synchronization 
 
 ## Acceptance
 
-- [V1.2 local acceptance and SMTP handoff](RELEASE-1.2-ACCEPTANCE.md) — local checks completed; real email and production acceptance await private configuration.
+- [V1.2 acceptance and operations handoff](RELEASE-1.2-ACCEPTANCE.md) — local checks and backend deployment completed; mailbox confirmation and production write acceptance remain pending.
 - [V1.1 acceptance](RELEASE-ACCEPTANCE.md) — historical release evidence.
 
 ## Contributing

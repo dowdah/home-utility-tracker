@@ -2,7 +2,7 @@
 
 记录日期：2026-10-02。Android `versionName=1.2`、`versionCode=3`；同步协议仍为 2。
 
-**状态：四阶段实现与本地验收完成，按约定暂停等待私有 SMTP 配置。真实邮件、生产部署和生产验收尚未执行；分支尚未 push，也未发起 PR。**
+**状态：四阶段实现与本地验收完成；私有 SMTP 配置已填写，生产后端已部署，SMTP 已接受验收邮件。收件确认与生产双 AVD 写入验收仍待完成；分支尚未 push，也未发起 PR。**
 
 ## Git 与实施范围
 
@@ -67,9 +67,9 @@ utility-sync/.venv/bin/python tools/live_acceptance.py --mode local --serial-a e
 
 备份脚本在结束后恢复原传输、启用状态和本地传输参数。最终回归/备份/同步验收包已清理，临时 token 已撤销；原有应用和此前其他验收包保留。测试文件只删除本次生成的 UUID 文件。真实 Google 云备份、用户的其他设备未作验收。
 
-## 现在需要填写的私有配置
+## 私有配置交接
 
-本机文件：`utility-sync/.local-config/notifications.env`。目录权限 `0700`、文件权限 `0600`，已被 Git 忽略。模板当前禁用发送；不要把填写后的文件或密码贴进聊天、提交或命令参数。
+本机文件：`utility-sync/.local-config/notifications.env`。目录权限 `0700`、文件权限 `0600`，已被 Git 忽略。用户已填写，校验通过后按授权启用发送；不要把填写后的文件或密码贴进聊天、提交或命令参数。
 
 填写方式：每行 `KEY=value`，值按字面读取，不加引号、不作变量展开、不加行尾注释。
 
@@ -83,17 +83,38 @@ utility-sync/.venv/bin/python tools/live_acceptance.py --mode local --serial-a e
 | `SMTP_FROM` | 发件人地址 |
 | `SMTP_TO` | 收件人地址，多个地址用逗号分隔 |
 
-填写后通知继续。恢复执行时先运行 `notify-check`（不发邮件），再发送明确标注的验收邮件。**SMTP 接受投递与收件人实际收到是两项证据，后者由用户确认。**
+先运行 `notify-check`（不发邮件），再发送明确标注的验收邮件。**SMTP 接受投递与收件人实际收到是两项证据，后者由用户确认。**
 
 监控只运行在树莓派本机，每五分钟检查；完全断电或完全失联时不能即时发邮件。没有增加 ECS 外部探测。邮件只含服务标识、异常代码、时间及必要诊断。SMTP 故障不阻止账本同步；SMTP 已接受但通知状态尚未落盘时崩溃，可能重复通知。
 
-## 配置完成后的剩余验收与交付
+## 2026-10-02 生产部署记录
 
-1. 重新核对分支/工作区、生产目标、运行源码和当前数据；校验私有 SMTP 配置并执行真实验收邮件，等待用户确认收到。
-2. 在线 SQLite 备份、校验和、完整性与副本恢复演练；保存旧源码。部署前后核对原有读数、充值、费率、token、后端身份、操作历史/请求指纹和原子组，避免覆盖现有账本。
-3. 用已提交 revision 部署后端；SMTP 配置经 SSH 标准输入安装至生产私有配置，仅监控/显式配置 CLI 读取。检查主服务、隧道、定时器及脱敏 `/api/v1/status`。
-4. 双 AVD 以临时 token 和标记测试记录进行生产验收；结束后只软删除本次测试记录、撤销临时 token。后续已有新写入时，采用保留当前账本的修复方式。
-5. 完成必要回归和真实邮件/生产验收记录，阶段提交最终脱敏报告；全部必要验收通过后 push，等待 GitHub CI 通过。
-6. 创建目标为 `main` 的正常 PR，列明部署 revision、数据保护和验收证据，并附加到当前聊天；保持打开，等待用户安排 squash merge。
+用户通知私有配置填写完成后继续执行；起始工作区干净。部署 revision 为 `6fb894c6ca51035d5bf5b731bd9470b8cd4f7517`，实际导入源码为 `/opt/utility-sync/src/utility_sync/service.py`。
 
-真实邮件、生产验收、GitHub CI、push 和 PR 均保持待完成，不能依据本次本地结果记为通过。历史 [V1.1 验收报告](RELEASE-ACCEPTANCE.md) 保留为历史记录。
+| 检查 | 结果 |
+| --- | --- |
+| 私有配置 | 字段校验通过；原 `SMTP_ENABLED=false`，按已授权的邮件验收计划改为 `true`。本机保持 `0600`；经 SSH 标准输入安装，生产为 `0640 root:utility-sync`。没有将配置内容输出或提交。 |
+| 部署前在线备份 | 独立验证 SHA-256、侧车校验值和 SQLite `integrity_check=ok`。停止主服务后再次由旧代码执行验证备份，校验值一致。停止期间没有重置数据库。 |
+| 原有数据 | 部署时 metadata 2、meters 3、readings 20、tariffs 4、recharges 2、changes 41、operations 40、tokens 5、atomic_groups 1。副本迁移与生产迁移后，所有原有列/行的哈希保持相同，包括操作请求指纹与后端身份。 |
+| 恢复演练和旧源码 | 在线 SQLite 副本迁移前后原始行校验通过，演练副本完整性 `ok`；旧源码保存在 `/srv/utility-meter/deployment-6fb894c6ca51/previous-source.tar`。 |
+| 当前备份 | 部署后备份任务成功，最新备份的侧车 SHA-256 再次验证通过。部署前验证备份 `utility-20261002T144011857671Z.sqlite3` 的 SHA-256 为 `cbf9a5846a1720af8db2ce5cfd693503c9f2d07fd5083b2e48cb9d1f21774e94`。常规备份仍按原有预算保留策略执行。 |
+| 主服务/隧道/定时器 | `utility-sync.service`、`utility-sync-tunnel.service`、backup timer、monitor timer 均 active。数据库可读，健康接口 `status=ok`；此项不代表生产写入验收通过。 |
+| 真实 SMTP | Mac 连接/TLS/认证探测通过，但发信连接在 EHLO 阶段被服务器关闭，报脱敏 `smtp_protocol_error`。从生产树莓派发送 `[Utility Sync] 验收测试` 成功，SMTP 已接受；收件人实际收件仍待确认。 |
+| 实际运维告警 | 生产已有 `disk_writes_disabled` 异常；部署后的本机监控发送成功，持久化通知状态 configured/enabled 为 true，last_success_at 非空、last_error_code 为空。 |
+| 生产 HTTPS 状态 | 经临时只读 token 请求 `/api/v1/status` 返回 200，追加通知状态已验证；临时 token 已撤销，原有 token 保留。临时清理脚本误用了不存在的辅助函数，随后以部署前快照精确辨认本次新增只读 token 并补偿撤销。 |
+
+### 尚未通过的生产门槛
+
+生产写保护阈值为 `10737418240` 字节（10 GiB），目前可用约 `3539599360` 字节，因此 `writes_enabled=false`。空间主要被本项目以外的共享文件和其他项目备份占用；本项目目录约 62 MB。
+
+没有降低保护阈值，没有删除其他项目文件或用户数据。已请求用户自行释放至少 8 GB，或明确指定可处理范围。磁盘保护解除前，生产双 AVD 的新增/编辑/删除验收不能进行，不能将完整生产验收记为通过。
+
+## 剩余验收与交付
+
+1. 等待用户确认验收邮件收到，并处理磁盘空间；重新核对 `writes_enabled=true`、分支/工作区、生产部署 revision 和当前数据。
+2. 双 AVD 以临时 token 和标记测试记录进行生产验收；结束后只软删除本次测试记录、撤销临时 token。再次核对原有读数、充值、费率、token、后端身份、操作历史/请求指纹和原子组；全局游标正常增长和本次测试新增历史不应误判为旧数据改变。
+3. 验证磁盘保护解除后的恢复通知（连续两次健康检查）；后续已有新写入时，采用保留当前账本的修复方式。
+4. 完成必要回归和真实邮件/生产验收记录，阶段提交最终脱敏报告；全部必要验收通过后 push，等待 GitHub CI 通过。
+5. 创建目标为 `main` 的正常 PR，列明部署 revision、数据保护和验收证据，并附加到当前聊天；保持打开，等待用户安排 squash merge。
+
+实际收件、生产双 AVD 写入验收、GitHub CI、push 和 PR 保持待完成。历史 [V1.1 验收报告](RELEASE-ACCEPTANCE.md) 保留为历史记录。
