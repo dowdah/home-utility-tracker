@@ -12,11 +12,13 @@ import kotlinx.coroutines.flow.Flow
     entities = [
         EndpointEntity::class, MeterEntity::class, ReadingEntity::class, TariffEntity::class, RechargeEntity::class,
         OutboxEntity::class, ConflictEntity::class, SyncStateEntity::class,
+        MeterReminderEntity::class, ReminderScheduleEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class UtilityDatabase : RoomDatabase() {
+    abstract fun reminderDao(): ReminderDao
     abstract fun endpointDao(): EndpointDao
     abstract fun meterDao(): MeterDao
     abstract fun readingDao(): ReadingDao
@@ -128,4 +130,14 @@ interface RechargeDao {
     @Query("SELECT * FROM recharges WHERE id = :id") suspend fun byId(id: String): RechargeEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: RechargeEntity)
     @Query("DELETE FROM recharges WHERE id = :id") suspend fun delete(id: String)
+}
+
+@Dao
+interface ReminderDao {
+    @Query("SELECT * FROM meter_reminders") fun observeMeters(): Flow<List<MeterReminderEntity>>
+    @Query("SELECT * FROM meter_reminders") suspend fun meters(): List<MeterReminderEntity>
+    @Query("SELECT * FROM reminder_schedule WHERE id=0") fun observeSchedule(): Flow<ReminderScheduleEntity?>
+    @Query("SELECT * FROM reminder_schedule WHERE id=0") suspend fun schedule(): ReminderScheduleEntity?
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveMeter(setting: MeterReminderEntity)
+    @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun saveSchedule(schedule: ReminderScheduleEntity)
 }

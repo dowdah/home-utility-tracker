@@ -173,4 +173,22 @@
     <string name="export_cancelled">已取消导出</string>
     <string name="export_failed">导出失败，请检查保存位置；存储提供方支持时会移除不完整文件。</string>
     <string name="background_sync_hint">有网络时每 15 分钟调度后台同步，Android 可能延迟执行。打开应用或下拉可提前同步。</string>
+
+    <string name="forecast_title">余额预测</string>
+    <string name="forecast_no_reading">请先记录一次实际剩余读数。</string>
+    <string name="forecast_insufficient">需要至少两次读数，电表覆盖24小时、水表覆盖7天。</string>
+    <string name="forecast_conflict">请先解决此表的读数或充值冲突。</string>
+    <string name="forecast_future">存在未来时间的读数，请修正时间后再预测。</string>
+    <string name="forecast_ambiguous">同一时间存在不同余额，请核对这些读数。</string>
+    <string name="forecast_invalid">最近区间存在异常，请核对读数和漏记的充值。</string>
+    <string name="forecast_stale">实际读数已过期，暂停预测和提醒，请获取新读数。</string>
+    <string name="forecast_remaining">估算当前余量：%1$s %2$s</string>
+    <string name="forecast_depleted">按当前趋势可能已用尽，请核实。</string>
+    <string name="forecast_zero_use">观测期内无消耗，无法预测可用天数。</string>
+    <string name="forecast_less_day">预计不足1天</string>
+    <string name="forecast_days">预计还能用 %1$s 天</string>
+    <string name="forecast_basis">依据 %1$s 天完整区间，日均 %2$s %3$s</string>
+    <string name="forecast_reading_date">实际读数时间：%1$s</string>
+    <string name="forecast_old">依据较旧，距抄表越久，估算误差可能越大。</string>
+    <string name="forecast_hint">估算已计入记录的充值，不代表实际抄表余额。</string>
 </resources>

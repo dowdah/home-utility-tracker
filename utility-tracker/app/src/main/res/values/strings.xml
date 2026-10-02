@@ -172,4 +172,22 @@
     <string name="export_cancelled">Export cancelled</string>
     <string name="export_failed">Export failed. Check the destination; incomplete files are removed when the provider supports it.</string>
     <string name="background_sync_hint">Background sync is scheduled every 15 minutes while connected. Android may delay it. Open the app or pull down to sync sooner.</string>
+
+    <string name="forecast_title">Balance forecast</string>
+    <string name="forecast_no_reading">Record a remaining reading to get started.</string>
+    <string name="forecast_insufficient">Need two readings covering at least 24 hours for electricity or 7 days for water.</string>
+    <string name="forecast_conflict">Resolve this meter’s reading or recharge conflict before forecasting.</string>
+    <string name="forecast_future">A reading is dated in the future. Correct its time to resume forecasts.</string>
+    <string name="forecast_ambiguous">Different balances share a timestamp. Check these readings.</string>
+    <string name="forecast_invalid">The latest interval is inconsistent. Check readings and missing recharges.</string>
+    <string name="forecast_stale">Reading too old to forecast. Obtain a new actual reading.</string>
+    <string name="forecast_remaining">Estimated balance now: %1$s %2$s</string>
+    <string name="forecast_depleted">May be exhausted at this rate. Please verify.</string>
+    <string name="forecast_zero_use">No observed use; days remaining cannot be predicted.</string>
+    <string name="forecast_less_day">Estimated to last less than 1 day</string>
+    <string name="forecast_days">Estimated to last %1$s days</string>
+    <string name="forecast_basis">Based on %1$s days: %2$s %3$s/day</string>
+    <string name="forecast_reading_date">Actual reading: %1$s</string>
+    <string name="forecast_old">Based on an older reading; uncertainty increases over time.</string>
+    <string name="forecast_hint">Estimate includes recorded recharges; it is not a measured balance.</string>
 </resources>

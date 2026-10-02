@@ -94,7 +94,9 @@ import kotlinx.serialization.json.jsonPrimitive
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun HomeScreen(viewModel: AppViewModel) {
+fun HomeScreen(viewModel: AppViewModel, forecastViewModel: ForecastViewModel = hiltViewModel()) {
+    val forecastState by forecastViewModel.state.collectAsState()
+    val forecasts = forecastState?.let { (snapshot, now) -> snapshot.forecasts(now).associateBy { it.meter.id } }.orEmpty()
     val dashboard by viewModel.dashboard.collectAsState()
     val tariffs by viewModel.tariffs.collectAsState()
     val recharges by viewModel.recharges.collectAsState()
@@ -109,6 +111,7 @@ fun HomeScreen(viewModel: AppViewModel) {
                 dashboard.meters.forEach { meter ->
                     Column(Modifier.fillMaxWidth(if (columns > 1) .31f else 1f)) {
                         MeterCard(meter, latest[meter.id], 1)
+                        forecasts[meter.id]?.let { ForecastCard(it) }
                         HomeMonthlySummary(meter, dashboard.readings, tariffs, recharges)
                     }
                 }
