@@ -172,4 +172,14 @@
     <string name="invalid_pending">A pending change is invalid; edit the record and retry</string>
     <string name="note_too_long">Note must be at most 1000 characters</string>
     <string name="status_stale">Server status has not been refreshed recently. Sync to check again.</string>
+    <string name="export_local">Local ledger</string>
+    <string name="export_server">Server snapshot</string>
+    <string name="export_local_description">Export current local records, including pending changes, deletion markers and conflict drafts. Works offline. sync_status identifies synced, pending or conflict rows.</string>
+    <string name="export_server_description">Download the current server snapshot. Requires a configured endpoint, token and network connection.</string>
+    <string name="export_server_pending_warning">Some local changes have not reached the server and may be absent from this snapshot.</string>
+    <string name="export_not_restore">CSV is for reviewing and keeping records. It cannot restore the app or its pending operation queue.</string>
+    <string name="export_working">Exporting…</string>
+    <string name="export_cancelled">Export cancelled</string>
+    <string name="export_failed">Export failed. Check the destination; incomplete files are removed when the provider supports it.</string>
+    <string name="background_sync_hint">Background sync is scheduled every 15 minutes while connected. Android may delay it. Open the app or pull down to sync sooner.</string>
 </resources>

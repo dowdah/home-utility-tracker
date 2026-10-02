@@ -65,6 +65,7 @@ interface MeterDao {
 
 @Dao
 interface ReadingDao {
+    @Query("SELECT * FROM readings ORDER BY id") suspend fun allForExport(): List<ReadingEntity>
     @Query("SELECT * FROM readings WHERE deleted = 0 ORDER BY recordedAt DESC")
     fun observeActive(): Flow<List<ReadingEntity>>
     @Query("SELECT * FROM readings WHERE meterId = :meterId AND deleted = 0 ORDER BY recordedAt DESC LIMIT 1")
@@ -78,6 +79,7 @@ interface ReadingDao {
 
 @Dao
 interface TariffDao {
+    @Query("SELECT * FROM tariffs ORDER BY id") suspend fun allForExport(): List<TariffEntity>
     @Query("SELECT * FROM tariffs WHERE deleted = 0 ORDER BY effectiveFrom DESC")
     fun observeActive(): Flow<List<TariffEntity>>
     @Query("SELECT * FROM tariffs WHERE deleted = 0 ORDER BY effectiveFrom")
@@ -121,6 +123,7 @@ interface SyncStateDao {
 
 @Dao
 interface RechargeDao {
+    @Query("SELECT * FROM recharges ORDER BY id") suspend fun allForExport(): List<RechargeEntity>
     @Query("SELECT * FROM recharges WHERE deleted = 0 ORDER BY creditedAt DESC") fun observeActive(): Flow<List<RechargeEntity>>
     @Query("SELECT * FROM recharges WHERE id = :id") suspend fun byId(id: String): RechargeEntity?
     @Insert(onConflict = OnConflictStrategy.REPLACE) suspend fun upsert(item: RechargeEntity)

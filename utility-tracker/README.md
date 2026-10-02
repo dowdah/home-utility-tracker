@@ -67,3 +67,13 @@ utility-sync/.venv/bin/python tools/backup_acceptance.py --serial emulator-5554
 ```
 
 Run this from the repository root. It builds a separate `.acceptancebackup` package, exercises upgrade and actual `bmgr` backup/restore, and restores the AVD's transport, enabled state and transport parameters even after failure. Only this isolated package and its own backup are cleared.
+
+## Offline exports and background updates (1.2)
+
+The export screen defaults to a local Room snapshot and also offers the existing authenticated server snapshot. Local exports include unsynchronized additions/edits, tombstones and conflict drafts, even without network or credentials. They retain each server CSV's business columns and append `sync_status` (`synced`, `pending`, `conflict`; conflicts take precedence). All rows and flags are captured in one transaction before writing UTF-8/RFC-style quoted CSV. CSV is a record copy, not an application/queue restore format.
+
+The chosen source/type is frozen while the system document picker is open and survives recreation. Controls are disabled during selection/writing; cancellation and write failures are visible. Partial files are removed when the document provider supports removal. The server option warns when local pending work or conflicts may be absent from its snapshot.
+
+One unique, network-constrained WorkManager job schedules a periodic pull every 15 minutes, with a 15-minute initial delay; Android can delay execution. Registration uses UPDATE and preserves job identity. Opening/returning to the app triggers an immediate pass, with repeated foreground events debounced for 60 seconds. Saving records, activating endpoints, configuring tokens and manual refresh trigger immediate work. Missing endpoint/token configuration produces a visible prompt without network requests. All paths share the repository mutex and retain immutable retries and grouped conflicts.
+
+`tools/live_acceptance.py --mode local --include-periodic` adds a real timer observation to the two-device ledger acceptance. It creates a record on A and verifies B receives it while backgrounded through a delayed periodic worker, without a manual pull.

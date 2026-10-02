@@ -277,17 +277,46 @@ fun EndpointScreen(onBack: () -> Unit, viewModel: EndpointViewModel = hiltViewMo
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable fun ExportScreen(viewModel: AppViewModel, onBack: () -> Unit) {
     val context = LocalContext.current
+    val dashboard by viewModel.dashboard.collectAsState()
+    val conflicts by viewModel.conflicts.collectAsState()
     var kind by rememberSaveable { mutableStateOf("readings") }
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri -> uri?.let { viewModel.exportCsv(context, it, kind) } }
+    var source by rememberSaveable { mutableStateOf("LOCAL") }
+    var pendingKind by rememberSaveable { mutableStateOf<String?>(null) }
+    var pendingSource by rememberSaveable { mutableStateOf<String?>(null) }
+    val choosing = pendingKind != null
+    val enabled = !choosing && !viewModel.exportBusy
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri ->
+        val frozenKind = pendingKind
+        val frozenSource = pendingSource
+        pendingKind = null; pendingSource = null
+        if (uri == null) viewModel.exportCancelled()
+        else if (frozenKind != null && frozenSource != null) viewModel.exportCsv(context, uri,
+            com.dowdah.utilitytracker.data.ExportRequest(frozenKind, com.dowdah.utilitytracker.data.ExportSource.valueOf(frozenSource)))
+    }
     Scaffold(topBar = { SimpleBackBar(stringResource(R.string.export_csv), onBack) }) { padding ->
-        Column(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text(stringResource(R.string.export_description))
-            listOf("readings" to R.string.readings_tab, "recharges" to R.string.recharges_tab, "tariffs" to R.string.tariff_history).forEach { (value, label) ->
-                FilterChip(kind == value, { kind = value }, label = { Text(stringResource(label)) })
+        Column(Modifier.padding(padding).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("LOCAL" to R.string.export_local, "SERVER" to R.string.export_server).forEach { (value, label) ->
+                    FilterChip(source == value, { source = value }, enabled = enabled, label = { Text(stringResource(label)) })
+                }
             }
-            Button({ launcher.launch("$kind.csv") }, modifier = Modifier.semantics { testTag = "export_save" }) { Text(stringResource(R.string.export_csv)) }
+            Text(stringResource(if (source == "LOCAL") R.string.export_local_description else R.string.export_server_description))
+            Text(stringResource(R.string.pending_changes, dashboard.pendingCount))
+            Text(stringResource(R.string.conflict_count, conflicts.size))
+            if (source == "SERVER" && (dashboard.pendingCount > 0 || conflicts.isNotEmpty())) {
+                Text(stringResource(R.string.export_server_pending_warning), color = MaterialTheme.colorScheme.error)
+            }
+            Text(stringResource(R.string.export_not_restore), style = MaterialTheme.typography.bodySmall)
+            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("readings" to R.string.readings_tab, "recharges" to R.string.recharges_tab, "tariffs" to R.string.tariff_history).forEach { (value, label) ->
+                    FilterChip(kind == value, { kind = value }, enabled = enabled, label = { Text(stringResource(label)) })
+                }
+            }
+            Button({ pendingKind = kind; pendingSource = source; launcher.launch("${source.lowercase(Locale.ROOT)}-$kind.csv") }, enabled = enabled,
+                modifier = Modifier.semantics { testTag = "export_save" }) { Text(stringResource(if (viewModel.exportBusy) R.string.export_working else R.string.export_csv)) }
             viewModel.message?.let { Text(localizedMessage(it) ?: it) }
         }
     }
@@ -320,6 +349,8 @@ fun EndpointScreen(onBack: () -> Unit, viewModel: EndpointViewModel = hiltViewMo
         value == "Conflict needs resolution" -> stringResource(R.string.conflict_detected)
         value == "Note must be at most 1000 characters" -> stringResource(R.string.note_too_long)
         value == "Saved locally" -> stringResource(R.string.saved_locally)
+        value == "Export cancelled" -> stringResource(R.string.export_cancelled)
+        value == "Export failed" -> stringResource(R.string.export_failed)
         value == "Export complete" -> stringResource(R.string.export_complete)
         value == "Sync complete" -> stringResource(R.string.sync_complete)
         value == "Conflict detected. Open Settings to resolve it." -> stringResource(R.string.conflict_detected)

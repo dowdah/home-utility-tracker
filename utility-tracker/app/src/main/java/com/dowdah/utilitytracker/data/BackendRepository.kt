@@ -118,6 +118,7 @@ class BackendRepository @Inject constructor(
     fun tokenPresent(): Boolean = secretStore.token() != null
     fun saveToken(token: String) = secretStore.saveToken(token.trim())
     fun clearToken() = secretStore.clearToken()
+    suspend fun isConfigured(): Boolean = database.endpointDao().active() != null && secretStore.token() != null
 
     private suspend fun enqueue(type: String, id: String, kind: String, revision: Long, payload: JsonObject,
                                 groupId: String? = null, groupSize: Int? = null) {
@@ -391,7 +392,12 @@ class BackendRepository @Inject constructor(
         }
     }
 
-    suspend fun exportCsv(output: java.io.OutputStream, kind: String = "readings"): Unit = withContext(Dispatchers.IO) {
+    suspend fun exportCsv(output: java.io.OutputStream, kind: String = "readings", source: ExportSource = ExportSource.LOCAL): Unit = withContext(Dispatchers.IO) {
+        require(kind in setOf("readings", "recharges", "tariffs"))
+        if (source == ExportSource.LOCAL) {
+            localCsvSnapshot(database, kind).writeTo(output)
+            return@withContext
+        }
         val endpoint = database.endpointDao().active() ?: throw EndpointValidationException("No active endpoint")
         val token = secretStore.token() ?: throw EndpointValidationException("No token configured")
         val response = client(endpoint.baseUrl, token).exportLedger(kind)

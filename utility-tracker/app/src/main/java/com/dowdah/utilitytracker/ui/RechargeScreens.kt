@@ -99,6 +99,7 @@ internal fun PersistentSyncSummary(dashboard: DashboardData, conflictCount: Int,
     ElevatedCard(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stringResource(R.string.pending_changes, dashboard.pendingCount), style = MaterialTheme.typography.titleMedium)
+            Text(stringResource(R.string.background_sync_hint), style = MaterialTheme.typography.bodySmall)
             Text(stringResource(R.string.last_sync, state?.lastSuccessAt?.let { Instant.ofEpochMilli(it).toString().localDisplay() } ?: stringResource(R.string.unknown)))
             if (conflictCount > 0) Text(stringResource(R.string.conflict_count, conflictCount), color = MaterialTheme.colorScheme.error)
             state?.lastError?.let { Text(localizedMessage(it) ?: it, color = MaterialTheme.colorScheme.error) }
