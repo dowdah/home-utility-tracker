@@ -69,9 +69,10 @@ def _row_dict(row: sqlite3.Row) -> dict[str, Any]:
 
 
 class SyncService:
-    def __init__(self, settings: Settings):
+    def __init__(self, settings: Settings, *, initialize_directories: bool = True):
         self.settings = settings
-        self.settings.ensure_directories()
+        if initialize_directories:
+            self.settings.ensure_directories()
         self.database = Database(settings.database)
 
     def _free_bytes(self, directory: Path) -> int:

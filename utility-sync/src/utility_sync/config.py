@@ -18,6 +18,11 @@ class Settings:
     write_min_free_bytes: int
     backup_min_free_bytes: int
     backup_max_bytes: int
+    monitor_dir: Path | None = None
+
+    @property
+    def monitor_state_dir(self) -> Path:
+        return self.monitor_dir or self.data_dir / "monitor"
 
     @classmethod
     def from_environment(cls) -> Settings:
@@ -35,6 +40,7 @@ class Settings:
                 os.environ.get("UTILITY_SYNC_BACKUP_MIN_FREE_BYTES", 256 * 1024**2)
             ),
             backup_max_bytes=int(os.environ.get("UTILITY_SYNC_BACKUP_MAX_BYTES", 128 * 1024**2)),
+            monitor_dir=_path("UTILITY_SYNC_MONITOR_DIR", data_dir / "monitor"),
         )
 
     def ensure_directories(self) -> None:

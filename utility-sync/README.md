@@ -49,6 +49,25 @@ A `recharge` mutation carries `meter_id`, positive decimal-string `amount_decima
 
 `batch_aborted` operations remain queued with their original IDs. A real conflict is replayed as `conflict`, never a successful duplicate. `group_conflict` requires one decision for the entire group. Accepted retries return `duplicate`. Operation IDs cannot be reused with different content.
 
-Existing readings CSV columns are unchanged; `/api/v1/exports/recharges.csv` and `/api/v1/exports/tariffs.csv` add the remaining ledger. Authenticated `/api/v1/status` exposes disk, backup and monitor alerts. Public `/healthz` exposes only service/database/write readiness. Install the monitor service/timer to check every five minutes; backup age over 36 hours is actionable. No external notifications are sent.
+Existing readings CSV columns are unchanged; `/api/v1/exports/recharges.csv` and `/api/v1/exports/tariffs.csv` add the remaining ledger. Authenticated `/api/v1/status` exposes disk, backup and monitor alerts. Public `/healthz` exposes only service/database/write readiness. Install the monitor service/timer to check every five minutes; backup age over 36 hours is actionable. SMTP incident notifications are available when the separate private configuration is enabled.
 
 Schema upgrades preserve meters, instance identity, tokens, readings, tariffs, operation history and revisions. Take and restore-verify a backup before upgrade. After new writes, do not roll back by restoring an older database: retain current data and forward-fix.
+
+## SMTP operational notifications (1.2)
+
+The five-minute monitor runs independently of Uvicorn and checks database availability, service/tunnel state, space and backup freshness. SMTP is disabled until a private configuration file is supplied. Only the monitor and explicit configuration/test CLI commands read this file; the API reads sanitized notification state.
+
+Fill the ignored `utility-sync/.local-config/notifications.env` from the repository root (local mode `0600`). Values are literal `KEY=value`, without quotes, variable expansion or inline comments. Enable `SMTP_ENABLED=true` after setting host, port, security (`starttls`/`ssl`), username/password, sender and comma-separated recipients. STARTTLS/587 and a 10-second timeout are the defaults; implicit TLS/465 is supported. Certificates are always verified. A provider-specific app password can be used for SMTP authentication.
+
+```sh
+# Run inside utility-sync; validation sends nothing.
+.venv/bin/utility-sync notify-check --config .local-config/notifications.env
+# Run only when ready to receive the explicitly marked test email.
+.venv/bin/utility-sync notify-test --config .local-config/notifications.env
+```
+
+A newly detected incident sends one message. Ongoing incidents remind every six hours; recovery requires two consecutive healthy checks. Delivery failures retry after 5, 10, 20, 40 and then 60 minutes. Durable state and a process lock prevent concurrent monitor runs from sending the same incident. SMTP acknowledgment is not proof of mailbox receipt; a crash after acknowledgment but before state publication can result in a duplicate (at-least-once delivery).
+
+Deploy private configuration with `tools/deploy_backend.py --notifications-config utility-sync/.local-config/notifications.env` alongside the existing host/revision arguments. It uses SSH stdin and installs `/etc/utility-sync/notifications.env` as `0640 root:utility-sync`; secrets never enter arguments, Git archives or logs. Production monitor state is `/srv/utility-meter/monitor`, separate from the ledger database. `/api/v1/status` adds `notifications` with enabled/configured flags, attempt/success times, pending-event count and an error code, never provider responses or addresses.
+
+This monitor covers only the Pi while it can run and reach SMTP. It cannot send an immediate alert during total host power loss or complete network loss. No ECS probe is installed.

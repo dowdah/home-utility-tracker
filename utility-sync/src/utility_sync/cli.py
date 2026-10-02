@@ -33,7 +33,18 @@ def parser() -> argparse.ArgumentParser:
     )
     result.add_argument("--database", help="override UTILITY_SYNC_DATABASE for this invocation")
     subcommands = result.add_subparsers(dest="command", required=True)
-    subcommands.add_parser("monitor", help="publish local service, disk and backup status")
+    monitor = subcommands.add_parser(
+        "monitor", help="publish local status and send configured incident mail"
+    )
+    monitor.add_argument(
+        "--notifications-file", type=Path, default=Path("/etc/utility-sync/notifications.env")
+    )
+    check = subcommands.add_parser(
+        "notify-check", help="validate private SMTP configuration without sending"
+    )
+    check.add_argument("--config", type=Path, required=True)
+    test = subcommands.add_parser("notify-test", help="send one explicitly marked acceptance email")
+    test.add_argument("--config", type=Path, required=True)
     subcommands.add_parser("migrate", help="apply schema migrations")
     issue = subcommands.add_parser(
         "issue-token", help="create a device token; print it exactly once"
@@ -61,11 +72,34 @@ def main(argv: list[str] | None = None) -> None:
         if args.command == "migrate":
             _migrate(settings)
             return
-        service = SyncService(settings)
+        if args.command in ("notify-check", "notify-test"):
+            from datetime import UTC, datetime
+
+            from .notifications import NotificationError, SMTPSettings, send_email
+
+            try:
+                config = SMTPSettings.load(args.config)
+                if not config.enabled:
+                    raise NotificationError("notifications_disabled")
+                config.validate()
+                if args.command == "notify-test":
+                    send_email(
+                        config,
+                        {"synthetic_acceptance": "fault", "synthetic_recovery": "recovery"},
+                        datetime.now(UTC),
+                        test=True,
+                    )
+                    print("SMTP accepted the acceptance email; confirm mailbox receipt separately.")
+                else:
+                    print("SMTP configuration valid; no mail sent.")
+            except NotificationError as error:
+                raise SystemExit(error.code) from None
+            return
+        service = SyncService(settings, initialize_directories=args.command != "monitor")
         if args.command == "monitor":
             from .monitor import run_monitor
 
-            print(run_monitor(service))
+            print(run_monitor(service, notifications_file=args.notifications_file))
         elif args.command == "issue-token":
             print(issue_token(service.database, {"sync:read"} if args.read_only else None))
         elif args.command == "revoke-token":

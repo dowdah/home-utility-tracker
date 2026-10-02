@@ -173,7 +173,7 @@ def test_monitor_freshness_checksum_units_and_stale_state(service, monkeypatch):
     latest = service._backup_paths()[0]
     latest.with_suffix(".sqlite3.sha256").write_text("bad checksum")
     assert "backup_checksum_failed" in read_status(service)["alerts"]
-    path = service.settings.data_dir / "monitor.json"
+    path = service.settings.monitor_state_dir / "monitor.json"
     state = json.loads(path.read_text())
     state["checked_at"] = "2020-01-01T00:00:00Z"
     path.write_text(json.dumps(state))
