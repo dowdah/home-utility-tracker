@@ -1,6 +1,6 @@
 # Utility Tracker Android
 
-An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.2 adds explicit backup/restore protection, local offline CSV exports and scheduled cross-device synchronization to the recharge ledger and statistics.
+An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.3 adds separate balance forecasts and local daily reminders, alongside backup/restore protection, offline CSV exports and cross-device synchronization.
 
 ## Reading and recharge accounting
 
@@ -27,7 +27,7 @@ Room is the UI source. Entity changes and outbox operations are committed in one
 
 A real conflict preserves the latest local draft and refreshes the authoritative server snapshot. Keep-server and override-server resolve complete linked groups; overrides use new IDs and current base revisions. `batch_aborted` remains queued. Low server space retains local work while permitting pulls. Authentication, validation, version and identity problems remain visible instead of retrying blindly.
 
-Protocol 2 is required on both client and server. An incompatible peer preserves the local queue and requests an upgrade. Room schema 1 upgrades to 2 with explicit migration and exported schemas; destructive migration is disabled. Per-installation tokens remain encrypted with Android Keystore and are not included in CSV or logs.
+Protocol 2 is required on both client and server. An incompatible peer preserves the local queue and requests an upgrade. Room schemas 1 and 2 upgrade to 3 with explicit migrations and exported schemas; destructive migration is disabled. Per-installation tokens remain encrypted with Android Keystore and are not included in CSV or logs.
 
 Every configured endpoint must identify the same backend instance. HTTP is permitted for local/LAN testing with a visible plaintext-token warning; production should use HTTPS. Health checks validate service/database availability, including read-only degraded operation. Activation authenticates `/api/v1/meta`; server operational details require `/api/v1/status` authentication.
 
@@ -52,7 +52,7 @@ Production acceptance additionally requires explicit `--mode production --endpoi
 
 `tools/deploy_backend.py` stages a committed backend revision, rehearses additive migration on an online SQLite copy, preserves original-row hashes and old source, and verifies backup/monitor tasks. Read its arguments and the acceptance report before using it on a live host. After new writes, rollback must preserve the current ledger and prefer a forward fix.
 
-The build uses AGP built-in Kotlin and its new DSL with KSP 2.3.6, Hilt 2.59.2 and Kotlin/Compose/serialization plugins 2.2.21. The old KAPT and AGP compatibility flags are removed. Room schema 2 and its 1→2 migration remain unchanged. Never commit tokens, private device databases, exported personal ledgers or production credentials.
+The build uses AGP built-in Kotlin and its new DSL with KSP 2.3.6, Hilt 2.59.2 and Kotlin/Compose/serialization plugins 2.2.21. The old KAPT and AGP compatibility flags are removed. Room schema 3 adds local reminder settings; both 1→2→3 and 2→3 migrations preserve the ledger. Never commit tokens, private device databases, exported personal ledgers or production credentials.
 
 ## Android backup and restore (1.2)
 
@@ -77,3 +77,20 @@ The chosen source/type is frozen while the system document picker is open and su
 One unique, network-constrained WorkManager job schedules a periodic pull every 15 minutes, with a 15-minute initial delay; Android can delay execution. Registration uses UPDATE and preserves job identity. Opening/returning to the app triggers an immediate pass, with repeated foreground events debounced for 60 seconds. Saving records, activating endpoints, configuring tokens and manual refresh trigger immediate work. Missing endpoint/token configuration produces a visible prompt without network requests. All paths share the repository mutex and retain immutable retries and grouped conflicts.
 
 `tools/live_acceptance.py --mode local --include-periodic` adds a real timer observation to the two-device ledger acceptance. It creates a record on A and verifies B receives it while backgrounded through a delayed periodic worker, without a manual pull.
+
+## Balance forecasts and local reminders (1.3)
+
+Home keeps actual reading values/timestamps and displays a separate estimated current balance and days remaining. Forecasts never create readings or change historical charts, consumption totals or exports. Electricity uses approximately 30 days of complete intervals ending at the latest reading, with at least 24 hours of history; water uses 180 days, with at least seven days. The full boundary interval is retained. Mean use is total recharge-adjusted consumption divided by total elapsed time, not an average of interval rates. The estimate adds subsequent recorded recharges and subtracts projected consumption since the last reading.
+
+Older invalid intervals stop the usable continuous history. The latest invalid interval, ambiguous equal-time readings, future readings and unresolved reading/recharge conflicts block the affected meter. Pending local work is included. Electricity readings are marked old after seven days and expire after 30; water readings are marked old after 30 days and expire after 90. Recharges never reset actual-reading age. Zero observed use has no finite days estimate; valid quantity thresholds still work. Exhaustion is explicitly a projection requiring verification.
+
+Settings → Balance reminders enables phone notifications and requests Android permission only on an explicit user action. Each meter defaults to a seven-day threshold, with an optional non-negative quantity threshold; either can trigger a reminder. The daily time defaults to 15:00 and is editable. All low meters share one notification per device-local calendar day. Repeat evaluations silently update an existing notification; dismissing it does not cause another notification that day. Recovery removes the affected meter. Notification permission denial does not disable forecasts or settings.
+
+An independent network-unconstrained hourly WorkManager task and a delayed check for the selected time evaluate local snapshots, including while offline. Foreground entry, ledger/conflict changes and settings changes also trigger evaluation. Android can delay execution; a force-stopped app must be reopened. This is not an exact alarm or a server push service. Thresholds/time are local Room settings included in ledger backups; notification opt-in and recent notified dates live in noBackupFilesDir. Restore requires opting in again. Settings and deduplication do not sync across devices.
+
+```sh
+# Explicit AVD only; installs/removes a separate acceptance package and restores network state.
+python3 tools/reminder_acceptance.py --serial emulator-5554
+```
+
+Run the command from the repository root. It verifies denied notification permission, real background delivery with airplane mode enabled and Wi-Fi disabled, silent updates, dismissal and process restart. The synthetic test time is near-future; production defaults remain 15:00.

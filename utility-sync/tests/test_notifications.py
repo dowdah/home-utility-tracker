@@ -482,3 +482,33 @@ def test_monitor_clears_cancelled_delivery_error(service, tmp_path, monkeypatch)
     second = monitor.run_monitor(service, notifications_file=config)
     assert "notification_delivery_failed" not in second["alerts"]
     assert second["notifications"]["last_success_at"] is None
+
+
+def test_cancelled_failure_clears_even_with_an_unrelated_notified_incident(tmp_path):
+    config = config_file(tmp_path)
+    now = datetime(2026, 10, 2, tzinfo=UTC)
+    state = tmp_path / "state"
+    process_notifications(state, ["backup_overdue"], config, now=now, sender=lambda *args: None)
+
+    def fail(*args):
+        raise TimeoutError()
+
+    process_notifications(
+        state,
+        ["backup_overdue", "service_unavailable"],
+        config,
+        now=now + timedelta(minutes=5),
+        sender=fail,
+    )
+    for minute in (6, 7):
+        status = process_notifications(
+            state,
+            ["backup_overdue"],
+            config,
+            now=now + timedelta(minutes=minute),
+            sender=fail,
+        )
+    assert status["last_error_code"] is None
+    assert status["last_success_at"] == now.isoformat()
+    assert status["pending_event_count"] == 0
+    assert "backup_overdue" in json.loads((state / "notifications.json").read_text())["incidents"]

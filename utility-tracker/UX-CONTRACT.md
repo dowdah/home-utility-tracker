@@ -45,3 +45,13 @@ Default date/time controls remain Material pickers. Form quantities and monetary
 | Backup/restore | Encrypted cloud or D2D transport; closed/checkpointed ledger only. Preserve queue/group/conflict/cursor; credentials and device identity are excluded. Restores request a token and clear cached health. | BackupRecoveryTest, tools/backup_acceptance.py on both AVDs |
 | Offline CSV | Default local snapshot includes tombstones, pending work and conflict drafts; sync_status is explicit. Server source retains its contract and warns about excluded local work. Freeze picker arguments across recreation, show cancel/failure, prevent duplicate export. | CsvSnapshotTest, OfflineExportTest, ExportUiAcceptanceTest |
 | Cross-device updates | Unique 15-minute network-constrained periodic work, immediate foreground/save/configuration refresh, 60-second foreground debounce. Scheduling may be delayed; stale status never proves current health. | WorkSchedulerTest, opt-in real periodic live acceptance |
+
+## V1.3 forecasts and reminders
+
+| Behavior | Contract | Verification |
+| --- | --- | --- |
+| Forecast | Separate from actual readings and historical statistics. Weighted complete recharge-aware intervals, electricity/water windows and age limits, independent per-meter uncertainty/conflict handling. | BalanceForecastTest, ForecastRepositoryTest, ForecastCardTest |
+| Reminder preferences | Device-local Room schema 3; default 15:00, seven days, optional quantity threshold. Explicit notification permission; rejected permission leaves forecasts/settings usable. | Migration tests, ReminderSettingsTest |
+| Notification | One combined alert per local date, silent existing-notification updates, no repost after dismissal, cancel on recovery or invalid forecasts. No network constraint; Android scheduling may be delayed. | ReminderPolicyTest, ReminderRuntimeTest, real offline reminder harness |
+| Restore | Preserve threshold/time in the backed-up ledger; clear notification opt-in and daily state alongside credentials/installation identity. | BackupRecoveryTest, actual local-transport backup acceptance |
+| Conflict display | A server tombstone is shown as deleted even when its old business value is present. Missing server entity is unavailable; local tombstone is a deletion draft. | ConflictCardTest in Chinese and English |
