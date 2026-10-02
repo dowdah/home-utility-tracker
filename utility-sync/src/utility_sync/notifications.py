@@ -170,6 +170,23 @@ def _read_state(path: Path) -> dict[str, Any]:
         if value.get("version") != 1 or not isinstance(value.get("incidents"), dict):
             raise ValueError
         merged = _empty_state() | {key: value[key] for key in _empty_state() if key in value}
+        safe_errors = {
+            None,
+            "configuration_permissions",
+            "configuration_invalid",
+            "configuration_unreadable",
+            "notification_state_unreadable",
+            "smtp_authentication_failed",
+            "smtp_tls_failed",
+            "smtp_timeout",
+            "smtp_recipients_rejected",
+            "smtp_protocol_error",
+            "smtp_connection_failed",
+        }
+        if not isinstance(merged["enabled"], bool) or not isinstance(merged["configured"], bool):
+            raise ValueError
+        if merged["last_error_code"] not in safe_errors:
+            raise ValueError
         if not isinstance(merged["failure_count"], int) or not 0 <= merged["failure_count"] <= 5:
             raise ValueError
         for key in ("next_attempt_at", "last_attempt_at", "last_success_at"):

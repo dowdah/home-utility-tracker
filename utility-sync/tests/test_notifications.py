@@ -367,3 +367,20 @@ def test_real_loopback_smtp_tls_delivery_and_auth_rejection(
         finally:
             server.shutdown()
             thread.join(timeout=3)
+
+
+def test_status_never_echoes_unknown_text_from_corrupt_state(tmp_path):
+    (tmp_path / "notifications.json").write_text(
+        json.dumps(
+            dict(
+                version=1,
+                incidents={},
+                enabled=True,
+                configured=True,
+                last_error_code="fixture-private-password provider reply",
+            )
+        )
+    )
+    status = notifications.public_status(tmp_path)
+    assert status["last_error_code"] == "notification_state_unreadable"
+    assert "fixture-private-password" not in json.dumps(status)
