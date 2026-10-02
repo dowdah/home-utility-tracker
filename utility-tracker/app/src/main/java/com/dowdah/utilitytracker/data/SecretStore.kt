@@ -17,7 +17,7 @@ import javax.inject.Singleton
 
 /** Stores the API token encrypted with a non-exportable Android Keystore key. */
 @Singleton
-class SecretStore @Inject constructor(@ApplicationContext private val context: Context) {
+class SecretStore @Inject constructor(@param:ApplicationContext private val context: Context) {
     private val preferences = context.getSharedPreferences("utility_tracker_secrets", Context.MODE_PRIVATE)
 
     fun token(): String? = preferences.getString(TOKEN, null)?.let { encrypted ->
@@ -36,8 +36,8 @@ class SecretStore @Inject constructor(@ApplicationContext private val context: C
     fun installationId(): String {
         val file = AtomicFile(File(context.noBackupFilesDir, INSTALLATION_FILE))
         if (file.baseFile.exists()) return file.readFully().toString(Charsets.UTF_8)
-        // Only a working legacy key proves this is an ordinary upgrade, rather than
-        // old shared preferences restored on a new installation.
+        // Migrate an existing installation only when a legacy key is available.
+        // Completed restores clear legacy preferences before this method runs.
         val legacy = preferences.getString(INSTALLATION_ID, null)
             ?.takeIf { existingKey() != null }
         val id = legacy ?: UUID.randomUUID().toString()

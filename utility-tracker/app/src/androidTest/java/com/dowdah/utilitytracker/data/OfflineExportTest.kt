@@ -38,6 +38,20 @@ class OfflineExportTest {
             }
             assertEquals("1", localCsvSnapshot(db, "recharges").rows.single()[8])
             assertEquals("synced", localCsvSnapshot(db, "tariffs").rows.single().last())
+            // A provider rejecting the destination must report failure and release the busy guard.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                val model = com.dowdah.utilitytracker.ui.AppViewModel(
+                    repo, com.dowdah.utilitytracker.sync.SyncScheduler(context), androidx.lifecycle.SavedStateHandle(),
+                )
+                val store = androidx.lifecycle.ViewModelStore()
+                store.put("export-acceptance", model)
+                try {
+                    model.exportCsv(context, android.net.Uri.parse("content://invalid.acceptance.destination/document/missing"),
+                        ExportRequest(kind = "readings", source = ExportSource.LOCAL)).join()
+                    assertEquals("Export failed", model.message)
+                    assertFalse(model.exportBusy)
+                } finally { store.clear() }
+            }
         } finally { db.close() }
     }
 }

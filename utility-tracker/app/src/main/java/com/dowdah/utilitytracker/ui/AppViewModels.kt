@@ -203,7 +203,7 @@ class AppViewModel @Inject constructor(
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
         } catch (error: Exception) {
-            message = "Export failed"
+            message = if (error is com.dowdah.utilitytracker.data.EndpointValidationException) error.message else "Export failed"
             // CreateDocument produced this destination for this attempt; remove partial output when supported.
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                 runCatching { android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri) }

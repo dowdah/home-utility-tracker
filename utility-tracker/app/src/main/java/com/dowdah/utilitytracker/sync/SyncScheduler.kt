@@ -15,7 +15,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
-class SyncScheduler @Inject constructor(@ApplicationContext private val context: Context) {
+class SyncScheduler @Inject constructor(@param:ApplicationContext private val context: Context) {
     private var lastForegroundAt: Long? = null
     fun ensurePeriodic() = WorkManager.getInstance(context).enqueueUniquePeriodicWork(
         PERIODIC_SYNC, ExistingPeriodicWorkPolicy.UPDATE,

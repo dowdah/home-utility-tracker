@@ -1,11 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <data-extraction-rules>
+    <!-- Include-only rules exclude credentials, installation identity and WorkManager data. -->
     <cloud-backup disableIfNoEncryptionCapabilities="true">
         <include domain="database" path="utility-tracker.db" />
-        <exclude domain="sharedpref" path="." />
     </cloud-backup>
     <device-transfer>
         <include domain="database" path="utility-tracker.db" />
-        <exclude domain="sharedpref" path="." />
     </device-transfer>
 </data-extraction-rules>

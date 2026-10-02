@@ -62,6 +62,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.integerResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -128,7 +129,7 @@ fun HomeScreen(viewModel: AppViewModel) {
         Text(meterLabel(meter), style = MaterialTheme.typography.titleMedium)
         Text(reading?.let { "${it.valueDecimal} ${meter.unit}" } ?: "—", style = MaterialTheme.typography.headlineSmall)
         Text(reading?.recordedAt?.localDisplay() ?: stringResource(R.string.no_reading))
-        reading?.let { Text(stringResource(R.string.days_since_reading, java.time.Duration.between(Instant.parse(it.recordedAt), Instant.now()).toDays().coerceAtLeast(0)), style = MaterialTheme.typography.bodySmall) }
+        reading?.let { val days = java.time.Duration.between(Instant.parse(it.recordedAt), Instant.now()).toDays().coerceAtLeast(0); Text(pluralStringResource(R.plurals.days_since_reading, days.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), days), style = MaterialTheme.typography.bodySmall) }
     }
 }
 

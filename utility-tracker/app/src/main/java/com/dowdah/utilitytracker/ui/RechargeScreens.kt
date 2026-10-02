@@ -20,6 +20,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -446,7 +447,7 @@ private fun intervalDurationLabel(period: IntervalTrendPoint): String {
     return when {
         minutes >= 2880 -> stringResource(R.string.interval_duration_days, period.elapsedDays?.let(::formatTrendNumber) ?: "—")
         minutes >= 60 -> stringResource(R.string.interval_duration_hours, BigDecimal.valueOf(minutes).divide(BigDecimal.valueOf(60), 2, RoundingMode.HALF_EVEN).stripTrailingZeros().toPlainString())
-        minutes > 0 || duration.isZero -> stringResource(R.string.interval_duration_minutes, minutes)
+        minutes > 0 || duration.isZero -> pluralStringResource(R.plurals.interval_duration_minutes, minutes.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(), minutes)
         else -> stringResource(R.string.interval_duration_seconds, BigDecimal.valueOf(duration.seconds).add(BigDecimal.valueOf(duration.nano.toLong()).movePointLeft(9)).setScale(2, RoundingMode.HALF_EVEN).stripTrailingZeros().toPlainString())
     }
 }

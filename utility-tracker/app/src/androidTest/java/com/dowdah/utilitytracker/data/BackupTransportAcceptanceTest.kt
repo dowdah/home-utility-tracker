@@ -45,7 +45,14 @@ class BackupTransportAcceptanceTest {
                 secrets.saveToken("synthetic-transport-token")
                 File(context.filesDir, "not-backed-up").writeText("synthetic")
                 context.getSharedPreferences("not-backed-up", 0).edit().putString("sentinel", "synthetic").commit()
-                instrumentation.sendStatus(0, Bundle().apply { putString("old_identity", secrets.installationId()) })
+                val identity = secrets.installationId()
+                assertEquals("synthetic-transport-token", secrets.token())
+                // A 1.1 fixture uses apply(); wait for its disk state before replacing its APK.
+                assertTrue(context.getSharedPreferences("utility_tracker_secrets", 0).edit().commit())
+                instrumentation.sendStatus(0, Bundle().apply {
+                    putString("old_identity", identity)
+                    putString("seed_version", context.packageManager.getPackageInfo(context.packageName, 0).versionName)
+                })
             }
             "upgrade" -> {
                 assertEquals("synthetic-transport-token", secrets.token())

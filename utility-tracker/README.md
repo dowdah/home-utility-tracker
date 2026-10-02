@@ -1,6 +1,6 @@
 # Utility Tracker Android
 
-An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.1 adds explicit recharges, month/year statistics, persistent sync diagnostics and non-destructive database upgrades.
+An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.2 adds explicit backup/restore protection, local offline CSV exports and scheduled cross-device synchronization to the recharge ledger and statistics.
 
 ## Reading and recharge accounting
 
@@ -33,7 +33,7 @@ Every configured endpoint must identify the same backend instance. HTTP is permi
 
 ## Build and repeatable verification
 
-Use the repository Gradle wrapper, JDK 24 compilation toolchain, configured daemon JVM and Android SDK API 37. Android 15+ is required.
+Use the repository Gradle wrapper, JDK 25 for Gradle and compilation, JVM 24 bytecode targets, configured daemon JVM and Android SDK API 37. Android 15+ is required.
 
 ```sh
 ./gradlew :app:testAcceptanceUnitTest :app:assembleDebug :app:assembleAcceptanceAndroidTest
@@ -52,7 +52,7 @@ Production acceptance additionally requires explicit `--mode production --endpoi
 
 `tools/deploy_backend.py` stages a committed backend revision, rehearses additive migration on an online SQLite copy, preserves original-row hashes and old source, and verifies backup/monitor tasks. Read its arguments and the acceptance report before using it on a live host. After new writes, rollback must preserve the current ledger and prefer a forward fix.
 
-KAPT compatibility flags remain intentionally unchanged; migrating the build toolchain is a separate task. Never commit tokens, private device databases, exported personal ledgers or production credentials.
+The build uses AGP built-in Kotlin and its new DSL with KSP 2.3.6, Hilt 2.59.2 and Kotlin/Compose/serialization plugins 2.2.21. The old KAPT and AGP compatibility flags are removed. Room schema 2 and its 1→2 migration remain unchanged. Never commit tokens, private device databases, exported personal ledgers or production credentials.
 
 ## Android backup and restore (1.2)
 

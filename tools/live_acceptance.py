@@ -363,7 +363,15 @@ def main():
                 with contextlib.suppress(Exception):
                     run(["adb", "-s", serial, "reverse", "--remove", f"tcp:{broker.server_port}"])
             broker.shutdown()
+        if report["completed"]:
+            for serial in (args.serial_a, args.serial_b):
+                for target in (package + ".test", package):
+                    run(["adb", "-s", serial, "uninstall", target])
+            report["isolated_packages_removed"] = True
         if backend:
+            for serial in (args.serial_a, args.serial_b):
+                with contextlib.suppress(Exception):
+                    run(["adb", "-s", serial, "reverse", "--remove", f"tcp:{listen}"])
             backend.terminate()
             backend.wait(timeout=10)
         (work / "report.json").write_text(json.dumps(report, indent=2))
