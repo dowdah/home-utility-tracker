@@ -79,6 +79,7 @@ def main():
     parser.add_argument("--serial-a", default="emulator-5554")
     parser.add_argument("--serial-b", default="emulator-5556")
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--include-periodic", action="store_true", help="Observe one real 15-minute background interval")
     parser.add_argument(
         "--pause-before-cleanup",
         action="store_true",
@@ -250,7 +251,7 @@ def main():
 
         def step(role, name):
             print(f"Running {role}: {name}", flush=True)
-            if name != "verifyRestartB":
+            if name not in ("verifyRestartB", "periodicArmB", "periodicWaitB"):
                 run(["adb", "-s", serials[role], "shell", "am", "force-stop", package])
             output = run(
                 [
@@ -273,7 +274,7 @@ def main():
                     name,
                     f"{package}.test/androidx.test.runner.AndroidJUnitRunner",
                 ],
-                timeout=100,
+                timeout=1600 if name == "periodicWaitB" else 100,
             )
             # Avoid persisting the ephemeral credential-broker URL if a runner echoes arguments.
             output = output.replace(urls[role], "[ephemeral configuration]")
@@ -324,6 +325,11 @@ def main():
         time.sleep(5)
         step("b", "verifyRestartB")
         step("a", "exportA")
+        if args.include_periodic:
+            step("b", "periodicArmB")
+            run(["adb", "-s", args.serial_b, "shell", "input", "keyevent", "HOME"])
+            step("a", "periodicCreateA")
+            step("b", "periodicWaitB")
         if args.pause_before_cleanup:
             print(
                 f"Inspect only synthetic records marked {marker}. Press Enter to clean up.",
@@ -357,7 +363,15 @@ def main():
                 with contextlib.suppress(Exception):
                     run(["adb", "-s", serial, "reverse", "--remove", f"tcp:{broker.server_port}"])
             broker.shutdown()
+        if report["completed"]:
+            for serial in (args.serial_a, args.serial_b):
+                for target in (package + ".test", package):
+                    run(["adb", "-s", serial, "uninstall", target])
+            report["isolated_packages_removed"] = True
         if backend:
+            for serial in (args.serial_a, args.serial_b):
+                with contextlib.suppress(Exception):
+                    run(["adb", "-s", serial, "reverse", "--remove", f"tcp:{listen}"])
             backend.terminate()
             backend.wait(timeout=10)
         (work / "report.json").write_text(json.dumps(report, indent=2))

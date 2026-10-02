@@ -10,6 +10,7 @@ import com.dowdah.utilitytracker.data.BackendRepository
 import com.dowdah.utilitytracker.data.DashboardData
 import com.dowdah.utilitytracker.data.EndpointEntity
 import com.dowdah.utilitytracker.data.SyncResult
+import com.dowdah.utilitytracker.data.ExportRequest
 import com.dowdah.utilitytracker.data.defaultReadingMeterId
 import com.dowdah.utilitytracker.sync.SyncScheduler
 import java.time.Instant
@@ -39,7 +40,7 @@ class AppViewModel @Inject constructor(
     init {
         // A force-stop can cancel a constrained pending job. Re-enqueueing is idempotent
         // and makes persisted outbox work recover when the app is opened again.
-        scheduler.enqueue()
+        scheduler.onForeground()
     }
 
 
@@ -186,9 +187,28 @@ class AppViewModel @Inject constructor(
     fun deleteTariff(tariff: com.dowdah.utilitytracker.data.TariffEntity) = viewModelScope.launch { runCatching { repository.deleteTariff(tariff) }.onSuccess { scheduler.enqueue() }.onFailure { message = it.message } }
     fun keepServer(conflict: com.dowdah.utilitytracker.data.ConflictEntity) = viewModelScope.launch { runCatching { repository.keepServerConflict(conflict) }.onFailure { message = it.message } }
     fun overrideServer(conflict: com.dowdah.utilitytracker.data.ConflictEntity) = viewModelScope.launch { runCatching { repository.overrideConflict(conflict) }.onSuccess { scheduler.enqueue() }.onFailure { message = it.message } }
-    fun exportCsv(context: android.content.Context, uri: android.net.Uri, kind: String = "readings") = viewModelScope.launch {
-        runCatching { requireNotNull(context.contentResolver.openOutputStream(uri)).use { repository.exportCsv(it, kind) } }
-            .onSuccess { message = "Export complete" }.onFailure { message = it.message }
+    var exportBusy by mutableStateOf(false)
+        private set
+    fun exportCancelled() { message = "Export cancelled" }
+    fun exportCsv(context: android.content.Context, uri: android.net.Uri, request: ExportRequest) = viewModelScope.launch {
+        if (exportBusy) return@launch
+        exportBusy = true
+        try {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                requireNotNull(context.contentResolver.openOutputStream(uri, "wt")).use {
+                    repository.exportCsv(it, request.kind, request.source)
+                }
+            }
+            message = "Export complete"
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            message = if (error is com.dowdah.utilitytracker.data.EndpointValidationException) error.message else "Export failed"
+            // CreateDocument produced this destination for this attempt; remove partial output when supported.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                runCatching { android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri) }
+            }
+        } finally { exportBusy = false }
     }
     fun sync(onComplete: (() -> Unit)? = null) = viewModelScope.launch {
         message = when (val result = repository.sync()) {
@@ -205,6 +225,7 @@ class AppViewModel @Inject constructor(
 @HiltViewModel
 class EndpointViewModel @Inject constructor(
     private val repository: BackendRepository,
+    private val scheduler: SyncScheduler,
     private val savedState: SavedStateHandle,
 ) : ViewModel() {
     val endpoints = repository.endpoints.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -246,9 +267,9 @@ class EndpointViewModel @Inject constructor(
     fun save() = viewModelScope.launch { busy = true; runCatching { repository.saveEndpoint(editorId, editorLabel, editorUrl) }
         .onSuccess { closeEditor(); notice = "Endpoint saved. Add or update a token, then activate it." }.onFailure { error = it.message }.also { busy = false } }
     fun refresh() = viewModelScope.launch { busy = true; error = null; runCatching { repository.refreshHealth() }.onSuccess { notice = "Health updated" }.onFailure { error = it.message }.also { busy = false } }
-    fun enable(id: String) = viewModelScope.launch { busy = true; error = null; notice = null; runCatching { repository.enableEndpoint(id) }.onSuccess { notice = "Endpoint active" }.onFailure { error = it.message }.also { busy = false } }
+    fun enable(id: String) = viewModelScope.launch { busy = true; error = null; notice = null; runCatching { repository.enableEndpoint(id) }.onSuccess { notice = "Endpoint active"; scheduler.enqueue() }.onFailure { error = it.message }.also { busy = false } }
     fun delete(id: String) = viewModelScope.launch { repository.deleteEndpoint(id) }
-    fun saveToken(token: String) { repository.saveToken(token); showTokenEditor = false; notice = "Token saved. Select an endpoint to verify it." }
+    fun saveToken(token: String) { repository.saveToken(token); scheduler.enqueue(); showTokenEditor = false; notice = "Token saved. Select an endpoint to verify it." }
     fun clearToken() { repository.clearToken(); error = null }
 }
 

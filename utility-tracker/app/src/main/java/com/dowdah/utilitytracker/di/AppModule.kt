@@ -14,7 +14,10 @@ import javax.inject.Singleton
 @InstallIn(SingletonComponent::class)
 object AppModule {
     @Provides @Singleton
-    fun database(@ApplicationContext context: Context): UtilityDatabase = Room.databaseBuilder(
+    fun database(@ApplicationContext context: Context): UtilityDatabase {
+        com.dowdah.utilitytracker.data.LedgerRecovery.completeRestore(context)
+        return Room.databaseBuilder(
         context, UtilityDatabase::class.java, "utility-tracker.db",
     ).addMigrations(com.dowdah.utilitytracker.data.MIGRATION_1_2).build()
+    }
 }

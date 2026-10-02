@@ -122,11 +122,34 @@ class LiveLedgerAcceptanceTest {
                 syncSuccess()
                 for (kind in listOf("readings", "recharges", "tariffs")) {
                     val buffer = ByteArrayOutputStream()
-                    withContext(Dispatchers.IO) { repo.exportCsv(buffer, kind) }
+                    withContext(Dispatchers.IO) { repo.exportCsv(buffer, kind, ExportSource.SERVER) }
                     val csv = buffer.toString("UTF-8")
                     assertTrue(csv.startsWith("id,meter_id,")); assertFalse(csv.contains(config("token")))
                     if (kind != "tariffs") assertTrue(csv.contains(marker))
                 }
+            }
+            "periodicArmB" -> {
+                syncSuccess()
+                val manager = androidx.work.WorkManager.getInstance(context)
+                manager.cancelUniqueWork(SyncScheduler.UNIQUE_SYNC).result.get()
+                manager.cancelUniqueWork(SyncScheduler.PERIODIC_SYNC).result.get()
+                SyncScheduler(context).ensurePeriodic().result.get()
+                context.getSharedPreferences("live_acceptance", 0).edit().putLong("periodic_started", android.os.SystemClock.elapsedRealtime()).commit()
+                assertEquals(1, manager.getWorkInfosForUniqueWork(SyncScheduler.PERIODIC_SYNC).get().count { !it.state.isFinished })
+            }
+            "periodicCreateA" -> {
+                repo.saveReading(meterId = meter("ELECTRICITY"), value = "120", recordedAt = "2098-01-04T00:00:00Z", note = "$marker:periodic")
+                syncSuccess()
+            }
+            "periodicWaitB" -> {
+                withTimeout(25 * 60 * 1000L) {
+                    while (rows().none { it.note == "$marker:periodic" }) delay(2000)
+                }
+                val elapsed = android.os.SystemClock.elapsedRealtime() - context.getSharedPreferences("live_acceptance", 0).getLong("periodic_started", 0)
+                assertTrue("Expected a real delayed periodic run", elapsed >= 14 * 60 * 1000L)
+                val manager = androidx.work.WorkManager.getInstance(context)
+                assertEquals(1, manager.getWorkInfosForUniqueWork(SyncScheduler.PERIODIC_SYNC).get().count { !it.state.isFinished })
+                InstrumentationRegistry.getInstrumentation().sendStatus(2, android.os.Bundle().apply { putLong("periodic_elapsed_ms", elapsed) })
             }
             "cleanupA" -> {
                 syncSuccess()

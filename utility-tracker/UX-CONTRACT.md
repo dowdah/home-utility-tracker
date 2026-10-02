@@ -37,3 +37,11 @@ No existing reading is rewritten. Recharge-aware accounting remains a separate f
 | Operational status | `PersistentSyncSummary` | Persist success/error/status, show alert freshness and unresolved conflicts. Old cached status does not imply current health. | Live status acceptance |
 
 Default date/time controls remain Material pickers. Form quantities and monetary values use Decimal; Float is permitted only for chart geometry. New recharge records default to electricity; water recharge does not fabricate a reading. Editing or deleting a recharge never deletes its linked real reading.
+
+## V1.2 data protection and updates
+
+| Behavior | Contract | Verification |
+| --- | --- | --- |
+| Backup/restore | Encrypted cloud or D2D transport; closed/checkpointed ledger only. Preserve queue/group/conflict/cursor; credentials and device identity are excluded. Restores request a token and clear cached health. | BackupRecoveryTest, tools/backup_acceptance.py on both AVDs |
+| Offline CSV | Default local snapshot includes tombstones, pending work and conflict drafts; sync_status is explicit. Server source retains its contract and warns about excluded local work. Freeze picker arguments across recreation, show cancel/failure, prevent duplicate export. | CsvSnapshotTest, OfflineExportTest, ExportUiAcceptanceTest |
+| Cross-device updates | Unique 15-minute network-constrained periodic work, immediate foreground/save/configuration refresh, 60-second foreground debounce. Scheduling may be delayed; stale status never proves current health. | WorkSchedulerTest, opt-in real periodic live acceptance |

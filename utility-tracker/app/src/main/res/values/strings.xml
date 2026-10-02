@@ -7,19 +7,14 @@
     <string name="backend_urls">Backend URLs</string>
     <string name="add_url">Add URL</string>
     <string name="edit_url">Edit URL</string>
-    <string name="enable">Enable</string>
     <string name="delete">Delete</string>
     <string name="refresh">Refresh health</string>
     <string name="save">Save</string>
     <string name="cancel">Cancel</string>
     <string name="label">Label</string>
     <string name="base_url">Base URL</string>
-    <string name="active">Active</string>
-    <string name="no_endpoints">No backend URL configured</string>
     <string name="http_warning">HTTP sends your Bearer token without transport encryption.</string>
     <string name="token">API token</string>
-    <string name="save_token">Save token</string>
-    <string name="sync_now">Sync now</string>
     <string name="add_reading">Add reading</string>
     <string name="reading_value">Remaining reading</string>
     <string name="note">Note</string>
@@ -30,7 +25,6 @@
     <string name="range">Date range</string>
     <string name="consumption">Consumption</string>
     <string name="cost">Cost</string>
-    <string name="orientation_navigation">Main navigation</string>
     <string name="pull_to_sync">Pull down to sync</string>
     <string name="no_reading">No reading</string>
     <string name="all">All</string>
@@ -44,7 +38,6 @@
     <string name="change">Change</string>
     <string name="next">Next</string>
     <string name="all_time">All time</string>
-    <string name="today">Today</string>
     <string name="tariff_history">Tariff history</string>
     <string name="conflicts">Conflicts</string>
     <string name="export_csv">Export CSV</string>
@@ -59,7 +52,6 @@
     <string name="conflict_description">Another device changed this item. Choose which version to keep.</string>
     <string name="keep_server">Keep server</string>
     <string name="override_server">Override server</string>
-    <string name="export_description">Create a server CSV snapshot and save it to a location you choose.</string>
     <string name="add">Add</string>
     <string name="delete_tariff_message">Delete this tariff locally and sync a tombstone if it was already uploaded?</string>
     <string name="cold_water">Cold water</string>
@@ -120,8 +112,6 @@
     <string name="previous_period">Previous period</string>
     <string name="next_period">Next period</string>
     <string name="monthly_summary">This month</string>
-    <string name="trend">Consumption trend</string>
-    <string name="interval_trend">By reading interval; not daily consumption</string>
     <string name="day_unit">day</string>
     <string name="interval_average_title">Interval average consumption (%1$s/day)</string>
     <string name="interval_average_hint">Each point is the full interval average on its later reading date. The line shows a trend, not measured daily use.</string>
@@ -134,7 +124,7 @@
     <string name="interval_average_value">Interval average: %1$s</string>
     <string name="interval_duration_days">Elapsed: %1$s days</string>
     <string name="interval_duration_hours">Elapsed: %1$s hours</string>
-    <string name="interval_duration_minutes">Elapsed: %1$d minutes</string>
+    <plurals name="interval_duration_minutes"><item quantity="one">Elapsed: %1$d minute</item><item quantity="other">Elapsed: %1$d minutes</item></plurals>
     <string name="interval_duration_seconds">Elapsed: %1$s seconds</string>
     <string name="yearly_trend_title">Monthly consumption</string>
     <string name="yearly_trend_hint">Intervals are assigned to the later reading month; no daily use is inferred.</string>
@@ -157,7 +147,7 @@
     <string name="daily_remaining_hide_values">Hide daily values</string>
     <string name="last_sync">Last successful sync: %1$s</string>
     <string name="conflict_count">Unresolved conflicts: %1$d</string>
-    <string name="days_since_reading">%1$d days since last reading</string>
+    <plurals name="days_since_reading"><item quantity="one">%1$d day since last reading</item><item quantity="other">%1$d days since last reading</item></plurals>
     <string name="status_checked">Server status checked: %1$s</string>
     <string name="backup_overdue">No verified backup in the last 36 hours</string>
     <string name="backup_failed">Backup failed or could not be verified</string>
@@ -172,4 +162,14 @@
     <string name="invalid_pending">A pending change is invalid; edit the record and retry</string>
     <string name="note_too_long">Note must be at most 1000 characters</string>
     <string name="status_stale">Server status has not been refreshed recently. Sync to check again.</string>
+    <string name="export_local">Local ledger</string>
+    <string name="export_server">Server snapshot</string>
+    <string name="export_local_description">Export current local records, including pending changes, deletion markers and conflict drafts. Works offline. sync_status identifies synced, pending or conflict rows.</string>
+    <string name="export_server_description">Download the current server snapshot. Requires a configured endpoint, token and network connection.</string>
+    <string name="export_server_pending_warning">Some local changes have not reached the server and may be absent from this snapshot.</string>
+    <string name="export_not_restore">CSV is for reviewing and keeping records. It cannot restore the app or its pending operation queue.</string>
+    <string name="export_working">Exporting…</string>
+    <string name="export_cancelled">Export cancelled</string>
+    <string name="export_failed">Export failed. Check the destination; incomplete files are removed when the provider supports it.</string>
+    <string name="background_sync_hint">Background sync is scheduled every 15 minutes while connected. Android may delay it. Open the app or pull down to sync sooner.</string>
 </resources>

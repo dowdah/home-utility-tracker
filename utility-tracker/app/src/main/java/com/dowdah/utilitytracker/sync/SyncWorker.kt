@@ -18,13 +18,17 @@ class SyncWorker @AssistedInject constructor(
     private val repository: BackendRepository,
 ) : CoroutineWorker(context, parameters) {
     override suspend fun doWork(): Result {
+        if (!repository.isConfigured()) {
+            repository.sync() // Persist the configuration prompt without a network request.
+            return Result.success()
+        }
         val syncResult = repository.sync()
-        Log.i(TAG, "Completed sync worker with ${syncResult.javaClass.simpleName}")
+        Log.i(TAG, "Completed sync worker periodic=${inputData.getBoolean("periodic", false)} with ${syncResult.javaClass.simpleName}")
         return when (syncResult) {
             SyncResult.Success -> Result.success()
-            SyncResult.ConflictDetected -> Result.failure()
+            SyncResult.ConflictDetected -> if (inputData.getBoolean("periodic", false)) Result.success() else Result.failure()
             is SyncResult.Retryable -> Result.retry()
-            is SyncResult.ActionRequired -> Result.failure()
+            is SyncResult.ActionRequired -> if (inputData.getBoolean("periodic", false)) Result.success() else Result.failure()
         }
     }
 

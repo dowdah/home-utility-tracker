@@ -1,6 +1,6 @@
 # Utility Tracker Android
 
-An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.1 adds explicit recharges, month/year statistics, persistent sync diagnostics and non-destructive database upgrades.
+An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.2 adds explicit backup/restore protection, local offline CSV exports and scheduled cross-device synchronization to the recharge ledger and statistics.
 
 ## Reading and recharge accounting
 
@@ -33,7 +33,7 @@ Every configured endpoint must identify the same backend instance. HTTP is permi
 
 ## Build and repeatable verification
 
-Use the repository Gradle wrapper, JDK 24 compilation toolchain, configured daemon JVM and Android SDK API 37. Android 15+ is required.
+Use the repository Gradle wrapper, JDK 25 for Gradle and compilation, JVM 24 bytecode targets, configured daemon JVM and Android SDK API 37. Android 15+ is required.
 
 ```sh
 ./gradlew :app:testAcceptanceUnitTest :app:assembleDebug :app:assembleAcceptanceAndroidTest
@@ -52,4 +52,28 @@ Production acceptance additionally requires explicit `--mode production --endpoi
 
 `tools/deploy_backend.py` stages a committed backend revision, rehearses additive migration on an online SQLite copy, preserves original-row hashes and old source, and verifies backup/monitor tasks. Read its arguments and the acceptance report before using it on a live host. After new writes, rollback must preserve the current ledger and prefer a forward fix.
 
-KAPT compatibility flags remain intentionally unchanged; migrating the build toolchain is a separate task. Never commit tokens, private device databases, exported personal ledgers or production credentials.
+The build uses AGP built-in Kotlin and its new DSL with KSP 2.3.6, Hilt 2.59.2 and Kotlin/Compose/serialization plugins 2.2.21. The old KAPT and AGP compatibility flags are removed. Room schema 2 and its 1→2 migration remain unchanged. Never commit tokens, private device databases, exported personal ledgers or production credentials.
+
+## Android backup and restore (1.2)
+
+Cloud backup is permitted only when the Android transport has client-side encryption. Device-to-device transfer is also supported. Both use an explicit allowlist containing only `utility-tracker.db`: ledger rows, endpoints, backend identity/cursor, pending operation chains and conflicts are retained. The backup agent completes a WAL checkpoint and closes its connection before framework backup; a failed checkpoint aborts the backup. Tokens, the per-installation identity, WorkManager data, cache and logs are excluded.
+
+A normal signed APK upgrade retains the token and migrates the existing installation identity into `noBackupFilesDir`. Restore removes historical credential preferences too, creates a new installation identity and clears cached health/success information. Re-enter a token for the same backend to resume the retained queue. Operation IDs and linked groups are never regenerated during restore.
+
+For local transport acceptance (emulated encryption/D2D flags, not a Google cloud upload):
+
+```sh
+utility-sync/.venv/bin/python tools/backup_acceptance.py --serial emulator-5554
+```
+
+Run this from the repository root. It builds a separate `.acceptancebackup` package, exercises upgrade and actual `bmgr` backup/restore, and restores the AVD's transport, enabled state and transport parameters even after failure. Only this isolated package and its own backup are cleared.
+
+## Offline exports and background updates (1.2)
+
+The export screen defaults to a local Room snapshot and also offers the existing authenticated server snapshot. Local exports include unsynchronized additions/edits, tombstones and conflict drafts, even without network or credentials. They retain each server CSV's business columns and append `sync_status` (`synced`, `pending`, `conflict`; conflicts take precedence). All rows and flags are captured in one transaction before writing UTF-8/RFC-style quoted CSV. CSV is a record copy, not an application/queue restore format.
+
+The chosen source/type is frozen while the system document picker is open and survives recreation. Controls are disabled during selection/writing; cancellation and write failures are visible. Partial files are removed when the document provider supports removal. The server option warns when local pending work or conflicts may be absent from its snapshot.
+
+One unique, network-constrained WorkManager job schedules a periodic pull every 15 minutes, with a 15-minute initial delay; Android can delay execution. Registration uses UPDATE and preserves job identity. Opening/returning to the app triggers an immediate pass, with repeated foreground events debounced for 60 seconds. Saving records, activating endpoints, configuring tokens and manual refresh trigger immediate work. Missing endpoint/token configuration produces a visible prompt without network requests. All paths share the repository mutex and retain immutable retries and grouped conflicts.
+
+`tools/live_acceptance.py --mode local --include-periodic` adds a real timer observation to the two-device ledger acceptance. It creates a record on A and verifies B receives it while backgrounded through a delayed periodic worker, without a manual pull.
