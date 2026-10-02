@@ -2,7 +2,7 @@
 
 记录日期：2026-10-02。Android `versionName=1.2`、`versionCode=3`；同步协议仍为 2。
 
-**状态：四阶段实现与本地验收完成；私有 SMTP 配置已填写，生产后端已部署，SMTP 已接受验收邮件。收件确认与生产双 AVD 写入验收仍待完成；分支尚未 push，也未发起 PR。**
+**状态：四阶段实现、本地及生产必要验收均通过；生产后端已部署，真实验收邮件由 SMTP 接受且用户确认收到。双 AVD 真实周期同步和测试数据清理通过，原有数据核对通过。GitHub CI 与 PR 交付结果以分支/PR 的 GitHub Checks 和本次最终交接为准。**
 
 ## Git 与实施范围
 
@@ -99,22 +99,37 @@ utility-sync/.venv/bin/python tools/live_acceptance.py --mode local --serial-a e
 | 恢复演练和旧源码 | 在线 SQLite 副本迁移前后原始行校验通过，演练副本完整性 `ok`；旧源码保存在 `/srv/utility-meter/deployment-6fb894c6ca51/previous-source.tar`。 |
 | 当前备份 | 部署后备份任务成功，最新备份的侧车 SHA-256 再次验证通过。部署前验证备份 `utility-20261002T144011857671Z.sqlite3` 的 SHA-256 为 `cbf9a5846a1720af8db2ce5cfd693503c9f2d07fd5083b2e48cb9d1f21774e94`。常规备份仍按原有预算保留策略执行。 |
 | 主服务/隧道/定时器 | `utility-sync.service`、`utility-sync-tunnel.service`、backup timer、monitor timer 均 active。数据库可读，健康接口 `status=ok`；此项不代表生产写入验收通过。 |
-| 真实 SMTP | Mac 连接/TLS/认证探测通过，但发信连接在 EHLO 阶段被服务器关闭，报脱敏 `smtp_protocol_error`。从生产树莓派发送 `[Utility Sync] 验收测试` 成功，SMTP 已接受；收件人实际收件仍待确认。 |
+| 真实 SMTP | Mac 连接/TLS/认证探测通过，但发信连接在 EHLO 阶段被服务器关闭，报脱敏 `smtp_protocol_error`。从生产树莓派发送 `[Utility Sync] 验收测试` 成功，SMTP 已接受；用户于 2026-10-02 确认收到该验收邮件。 |
 | 实际运维告警 | 生产已有 `disk_writes_disabled` 异常；部署后的本机监控发送成功，持久化通知状态 configured/enabled 为 true，last_success_at 非空、last_error_code 为空。 |
 | 生产 HTTPS 状态 | 经临时只读 token 请求 `/api/v1/status` 返回 200，追加通知状态已验证；临时 token 已撤销，原有 token 保留。临时清理脚本误用了不存在的辅助函数，随后以部署前快照精确辨认本次新增只读 token 并补偿撤销。 |
 
-### 尚未通过的生产门槛
+### 磁盘保护处理
 
-生产写保护阈值为 `10737418240` 字节（10 GiB），目前可用约 `3539599360` 字节，因此 `writes_enabled=false`。空间主要被本项目以外的共享文件和其他项目备份占用；本项目目录约 62 MB。
+生产写保护阈值为 `10737418240` 字节（10 GiB），部署时可用约 `3539599360` 字节，因此 `writes_enabled=false`。空间主要被本项目以外的共享文件和其他项目备份占用；本项目目录约 62 MB。
 
-没有降低保护阈值，没有删除其他项目文件或用户数据。已请求用户自行释放至少 8 GB，或明确指定可处理范围。磁盘保护解除前，生产双 AVD 的新增/编辑/删除验收不能进行，不能将完整生产验收记为通过。
+用户明确授权后，只删除 `/var/backups/camera-monitor-usb-recovery-20260903/sandisk-cruzer-glide.img`，逻辑大小 `16008609792` 字节；删除前确认是预期的普通文件、没有 loop 挂载且未被进程打开。保留 `rescue-source.txt`、`sandisk-cruzer-glide.map`、`sandisk-cruzer-glide.map.bak`。
 
-## 剩余验收与交付
+删除后可用空间为 `19548147712` 字节，健康接口 `writes_enabled=true`；保护阈值未降低。两次真实健康检查后恢复通知被 SMTP 接受，告警清空，持久化状态权限 `0600`、活跃事件数 0、失败次数 0、错误码为空。用户的人工收件确认针对验收测试邮件；恢复通知记录为 SMTP 接受投递。
 
-1. 等待用户确认验收邮件收到，并处理磁盘空间；重新核对 `writes_enabled=true`、分支/工作区、生产部署 revision 和当前数据。
-2. 双 AVD 以临时 token 和标记测试记录进行生产验收；结束后只软删除本次测试记录、撤销临时 token。再次核对原有读数、充值、费率、token、后端身份、操作历史/请求指纹和原子组；全局游标正常增长和本次测试新增历史不应误判为旧数据改变。
-3. 验证磁盘保护解除后的恢复通知（连续两次健康检查）；后续已有新写入时，采用保留当前账本的修复方式。
-4. 完成必要回归和真实邮件/生产验收记录，阶段提交最终脱敏报告；全部必要验收通过后 push，等待 GitHub CI 通过。
-5. 创建目标为 `main` 的正常 PR，列明部署 revision、数据保护和验收证据，并附加到当前聊天；保持打开，等待用户安排 squash merge。
+生产双 AVD 验收前另建在线快照 `/srv/utility-meter/deployment-6fb894c6ca51/production-preacceptance.sqlite3`，完整性 `ok`、SHA-256 为 `256eabd267cf719dd111812d95aca660ab28033657429e11275050ccca2262f9`。此时原有业务数据仍与部署前相同，tokens 从 5 增至 6 的一行是已撤销的状态接口验收 token。
 
-实际收件、生产双 AVD 写入验收、GitHub CI、push 和 PR 保持待完成。历史 [V1.1 验收报告](RELEASE-ACCEPTANCE.md) 保留为历史记录。
+## 生产双 AVD 与最终回归结果
+
+使用 `emulator-5554` / Pixel_6_Pro 和 `emulator-5556` / Pixel_10_Pro，现有生产 HTTPS 端点、独立命名空间与临时 token。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| 生产同步 | 22 个步骤全部通过：充值原子组、两种冲突解决、水表无伪造读数、删除传播、断网队列/重启恢复、服务器导出、真实周期同步及清理。 |
+| 真实周期 | B 保持后台，不手动拉取，收到 A 的新增记录；实测 `902510 ms`。本机隔离后端先前实测 `901630 ms`。 |
+| 测试数据清理 | 本次 6 条读数、2 条充值、1 条费率软删除；两个临时同步 token 撤销。双 AVD 本次生产隔离包及测试包已卸载并独立核对；原有应用保留。 |
+| 原有数据保护 | 验收后按验收前快照的主键和全部原有列逐行比对，原有 meters 3、readings 20、tariffs 4、recharges 2、changes 41、operations 40、tokens 6、atomic_groups 1 均不变。后端身份不变；全局 revision 从 41 正常增长至 62，保留新增测试操作历史。SQLite 完整性 `ok`。 |
+| 最终回归 | 后端 36 项、Ruff 检查及格式检查通过；Android `:app:testAcceptanceUnitTest :app:assembleDebug :app:lintDebug` 通过，36 项 JVM 测试零失败/跳过，lint 0 错误、34 警告。项目仅为 Acceptance 变体启用单元测试，不使用已禁用的 Debug 单元任务。 |
+| 最终生产状态 | 验收清理后再次执行验证备份与监控；主服务/隧道正常、数据库可读且允许写入、监控告警为空，通知状态 configured/enabled 为 true、错误码为空。 |
+
+本机临时运行证据：`utility-ledger-acceptance-2dd_l8f4/report.json` 及该目录各步骤日志；独立核对结果 `/private/tmp/utility-v12-production-verification.json`。生产脱敏核对结果保存为 `/srv/utility-meter/deployment-6fb894c6ca51/production-acceptance-verification.json`。未重置或替换生产账本；后续新写入仍采用保留当前账本的修复方式。
+
+## Git 交付
+
+提交本报告后 push，等待 GitHub CI 通过，再创建目标为 `main` 的正常 PR，并附加到当前聊天。PR 列明部署 revision 和验收证据，保持打开，等待用户安排 squash merge；不自动合并或删除分支。
+
+实际 Google 云备份不在本次 AVD 本地传输验收范围内；整机断电/完全失联时的外部探测未增加。历史 [V1.1 验收报告](RELEASE-ACCEPTANCE.md) 保留为历史记录。
