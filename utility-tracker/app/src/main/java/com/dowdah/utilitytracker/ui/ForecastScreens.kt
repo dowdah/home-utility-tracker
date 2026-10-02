@@ -20,10 +20,11 @@ import java.math.RoundingMode
 internal fun BigDecimal.forecastDisplay() = setScale(2, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
 
 @Composable
-internal fun ForecastCard(forecast: BalanceForecast) {
+internal fun ForecastCard(forecast: BalanceForecast, low: Boolean = false) {
     ElevatedCard(Modifier.fillMaxWidth().padding(top = 8.dp)) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stringResource(R.string.forecast_title), style = MaterialTheme.typography.titleSmall)
+            if (low) Text(stringResource(R.string.forecast_low), color = MaterialTheme.colorScheme.error)
             forecast.issue?.let { issue ->
                 Text(stringResource(when (issue) {
                     ForecastIssue.NO_READING -> R.string.forecast_no_reading

@@ -3,7 +3,6 @@ package com.dowdah.utilitytracker.ui
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.dowdah.utilitytracker.data.ForecastRepository
-import com.dowdah.utilitytracker.data.ForecastSnapshot
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import java.time.Instant

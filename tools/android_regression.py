@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.dowdah.utilitytracker.acceptanceregression"
 CLASSES = {
-    "data.DatabaseMigrationTest": 1,
+    "data.DatabaseMigrationTest": 2,
     "data.LedgerRepositoryTest": 8,
     "data.BackupRecoveryTest": 2,
     "data.OfflineExportTest": 1,
@@ -25,6 +25,11 @@ CLASSES = {
     "ui.DailyRemainingUiTest": 3,
     "ui.IntervalAverageTrendUiTest": 4,
     "ui.ExportUiAcceptanceTest": 1,
+    "ui.ConflictCardTest": 1,
+    "ui.ForecastCardTest": 1,
+    "data.ForecastRepositoryTest": 1,
+    "data.ReminderRuntimeTest": 1,
+    "ui.ReminderSettingsTest": 1,
 }
 
 

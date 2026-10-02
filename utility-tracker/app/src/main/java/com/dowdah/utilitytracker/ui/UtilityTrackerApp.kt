@@ -49,12 +49,15 @@ private enum class Destination(val title: Int) {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun UtilityTrackerApp(appViewModel: AppViewModel = hiltViewModel()) {
+fun UtilityTrackerApp(openHome: Int = 0, appViewModel: AppViewModel = hiltViewModel()) {
     val navController = rememberNavController()
     val navEntry by navController.currentBackStackEntryAsState()
     val secondary = navEntry?.destination?.route?.let { it != "main" } ?: false
     var destinationName by rememberSaveable { mutableStateOf(Destination.HOME.name) }
     val destination = Destination.valueOf(destinationName)
+    androidx.compose.runtime.LaunchedEffect(openHome) {
+        if (openHome > 0) { navController.popBackStack("main", false); destinationName = Destination.HOME.name }
+    }
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val select: (Destination) -> Unit = { destinationName = it.name }
     val content: @Composable () -> Unit = {
@@ -63,11 +66,12 @@ fun UtilityTrackerApp(appViewModel: AppViewModel = hiltViewModel()) {
                 Destination.HOME -> HomeScreen(appViewModel)
                 Destination.RECORDS -> RecordsScreen(appViewModel)
                 Destination.STATISTICS -> StatisticsScreen(appViewModel, onTariffs = { navController.navigate("tariffs") })
-                Destination.SETTINGS -> SettingsScreen(appViewModel, onEndpoints = { navController.navigate("endpoints") }, onTariffs = { navController.navigate("tariffs") }, onConflicts = { navController.navigate("conflicts") }, onExport = { navController.navigate("export") })
+                Destination.SETTINGS -> SettingsScreen(appViewModel, onEndpoints = { navController.navigate("endpoints") }, onTariffs = { navController.navigate("tariffs") }, onConflicts = { navController.navigate("conflicts") }, onExport = { navController.navigate("export") }, onReminders = { navController.navigate("reminders") })
             } }
             composable("endpoints") { EndpointScreen(onBack = { navController.popBackStack() }) }
             composable("tariffs") { TariffScreen(appViewModel, onBack = { navController.popBackStack() }) }
             composable("conflicts") { ConflictScreen(appViewModel, onBack = { navController.popBackStack() }) }
+            composable("reminders") { ReminderSettingsScreen(onBack = { navController.popBackStack() }) }
             composable("export") { ExportScreen(appViewModel, onBack = { navController.popBackStack() }) }
         }
     }

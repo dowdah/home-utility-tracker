@@ -190,4 +190,22 @@
     <string name="forecast_reading_date">Actual reading: %1$s</string>
     <string name="forecast_old">Based on an older reading; uncertainty increases over time.</string>
     <string name="forecast_hint">Estimate includes recorded recharges; it is not a measured balance.</string>
+
+    <string name="reminder_settings">Balance reminders</string>
+    <string name="reminder_enable">Enable phone notifications</string>
+    <string name="reminder_schedule_hint">One combined reminder per day after the selected time. Android may delay delivery. Forecasts work offline and use this device’s ledger.</string>
+    <string name="reminder_permission_hint">System notifications are disabled. Forecasts and settings still work.</string>
+    <string name="reminder_system_settings">System notification settings</string>
+    <string name="reminder_save_error">Could not save reminder settings. Check the values and try again.</string>
+    <string name="reminder_time">Daily reminder: %1$s</string>
+    <string name="reminder_choose_time">Daily reminder time</string>
+    <string name="reminder_days">Days remaining threshold (1–365)</string>
+    <string name="reminder_quantity_enable">Also remind below a quantity threshold</string>
+    <string name="reminder_quantity">Remaining quantity threshold (%1$s)</string>
+    <string name="reminder_threshold_hint">Remind when either threshold is met. Unavailable or expired forecasts do not trigger notifications.</string>
+    <string name="reminder_channel">Low balance estimates</string>
+    <string name="reminder_title">Estimated low utility balance</string>
+    <string name="reminder_old_date">Older reading: %1$s</string>
+    <string name="reminder_open">Open the app to view estimates.</string>
+    <string name="forecast_low">Estimated balance meets your reminder threshold</string>
 </resources>

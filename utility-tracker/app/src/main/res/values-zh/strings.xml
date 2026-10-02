@@ -191,4 +191,22 @@
     <string name="forecast_reading_date">实际读数时间：%1$s</string>
     <string name="forecast_old">依据较旧，距抄表越久，估算误差可能越大。</string>
     <string name="forecast_hint">估算已计入记录的充值，不代表实际抄表余额。</string>
+
+    <string name="reminder_settings">余额提醒</string>
+    <string name="reminder_enable">开启手机通知</string>
+    <string name="reminder_schedule_hint">每天在所选时间之后汇总提醒一次，Android 可能延迟送达。根据此设备的账本计算，离线也可运行。</string>
+    <string name="reminder_permission_hint">系统通知未开启，仍可查看预测和修改设置。</string>
+    <string name="reminder_system_settings">系统通知设置</string>
+    <string name="reminder_save_error">提醒设置保存失败，请检查数值后重试。</string>
+    <string name="reminder_time">每日提醒时间：%1$s</string>
+    <string name="reminder_choose_time">每日提醒时间</string>
+    <string name="reminder_days">剩余天数阈值（1–365）</string>
+    <string name="reminder_quantity_enable">同时启用剩余量阈值</string>
+    <string name="reminder_quantity">剩余量阈值（%1$s）</string>
+    <string name="reminder_threshold_hint">任一条件达到阈值即可提醒；预测不可用或已过期时不发通知。</string>
+    <string name="reminder_channel">低余额估算提醒</string>
+    <string name="reminder_title">水电余量偏低（估算）</string>
+    <string name="reminder_old_date">依据较旧，抄表日期：%1$s</string>
+    <string name="reminder_open">打开应用查看估算详情。</string>
+    <string name="forecast_low">估算余量已达到提醒阈值</string>
 </resources>

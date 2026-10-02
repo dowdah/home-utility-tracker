@@ -58,6 +58,12 @@ class BackupTransportAcceptanceTest {
                 assertEquals("synthetic-transport-token", secrets.token())
                 assertEquals(args.getString("oldIdentity"), secrets.installationId())
                 assertEquals(reading, db.readingDao().byId(reading.id))
+                assertEquals(listOf(operation, second, child), db.outboxDao().all())
+                assertEquals(conflict, db.conflictDao().all().single())
+                assertEquals("backup-backend", db.syncStateDao().current()!!.backendInstanceId)
+                db.reminderDao().saveMeter(MeterReminderEntity("backup-meter", false, 12, "20.5"))
+                db.reminderDao().saveSchedule(ReminderScheduleEntity(hour=18, minute=25))
+                entry.reminderDevice().update { it.copy(enabled=false, notifiedDates=setOf("2026-10-03")) }
             }
             "empty" -> {
                 assertTrue(db.readingDao().active().isEmpty())
@@ -65,6 +71,10 @@ class BackupTransportAcceptanceTest {
                 assertNull(secrets.token())
             }
             "restored" -> {
+                assertEquals(MeterReminderEntity("backup-meter",false,12,"20.5"),db.reminderDao().meters().single())
+                assertEquals(ReminderScheduleEntity(hour=18,minute=25),db.reminderDao().schedule())
+                assertFalse(entry.reminderDevice().state.value.enabled)
+                assertTrue(entry.reminderDevice().state.value.notifiedDates.isEmpty())
                 assertEquals(reading, db.readingDao().byId(reading.id)); assertEquals(credit, db.rechargeDao().byId(credit.id))
                 assertEquals(listOf(operation, second, child), db.outboxDao().all())
                 assertEquals(conflict, db.conflictDao().all().single())

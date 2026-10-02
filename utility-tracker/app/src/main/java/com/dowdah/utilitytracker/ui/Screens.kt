@@ -111,7 +111,7 @@ fun HomeScreen(viewModel: AppViewModel, forecastViewModel: ForecastViewModel = h
                 dashboard.meters.forEach { meter ->
                     Column(Modifier.fillMaxWidth(if (columns > 1) .31f else 1f)) {
                         MeterCard(meter, latest[meter.id], 1)
-                        forecasts[meter.id]?.let { ForecastCard(it) }
+                        forecasts[meter.id]?.let { forecast -> ForecastCard(forecast, forecastState?.first?.let { forecast.isLow(it.setting(meter.id)) } == true) }
                         HomeMonthlySummary(meter, dashboard.readings, tariffs, recharges)
                     }
                 }
@@ -223,10 +223,10 @@ fun RecordsScreen(viewModel: AppViewModel) {
 }
 
 @Composable
-fun SettingsScreen(viewModel: AppViewModel, onEndpoints: () -> Unit, onTariffs: () -> Unit, onConflicts: () -> Unit, onExport: () -> Unit) {
+fun SettingsScreen(viewModel: AppViewModel, onEndpoints: () -> Unit, onTariffs: () -> Unit, onConflicts: () -> Unit, onExport: () -> Unit, onReminders: () -> Unit) {
     val conflicts by viewModel.conflicts.collectAsState()
     LazyColumn(Modifier.padding(vertical = 12.dp)) {
-        item { ElevatedCard(Modifier.fillMaxWidth()) { Column { SettingsRow(stringResource(R.string.backend_urls), onEndpoints); HorizontalDivider(); SettingsRow(stringResource(R.string.tariff_history), onTariffs); HorizontalDivider(); SettingsRow("${stringResource(R.string.conflicts)} (${conflicts.size})", onConflicts); HorizontalDivider(); SettingsRow(stringResource(R.string.export_csv), onExport) } } }
+        item { ElevatedCard(Modifier.fillMaxWidth()) { Column { SettingsRow(stringResource(R.string.reminder_settings), onReminders); HorizontalDivider(); SettingsRow(stringResource(R.string.backend_urls), onEndpoints); HorizontalDivider(); SettingsRow(stringResource(R.string.tariff_history), onTariffs); HorizontalDivider(); SettingsRow("${stringResource(R.string.conflicts)} (${conflicts.size})", onConflicts); HorizontalDivider(); SettingsRow(stringResource(R.string.export_csv), onExport) } } }
     }
 }
 @Composable private fun SettingsRow(label: String, action: () -> Unit) = ListItem(headlineContent = { Text(label) }, modifier = Modifier.fillMaxWidth().clickable(onClick = action), trailingContent = { Text("›") })
