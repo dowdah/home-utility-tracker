@@ -20,6 +20,7 @@ CLASSES = {
     "ui.StatisticsScreenChartsTest": 3,
     "ui.IntervalAverageTrendUiTest": 5,
     "ui.DailyRemainingUiTest": 3,
+    "ui.StatisticsLongHistoryTest": 1,
 }
 
 

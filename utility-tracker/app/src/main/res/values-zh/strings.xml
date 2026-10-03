@@ -107,8 +107,8 @@
     <string name="delete_recharge_message">删除此充值并同步？消耗将重新计算，实际抄表读数会保留。</string>
     <string name="no_recharges">尚无充值。可填写金额和购入单价新增。</string>
     <string name="linked_conflict">此充值与充值后读数相关联。保留或覆盖将对整组记录生效。</string>
-    <string name="month_mode">月</string>
-    <string name="year_mode">年</string>
+    <string name="month_mode">自然月</string>
+    <string name="year_mode">自然年</string>
     <string name="custom_mode">自定义</string>
     <string name="last_30_days">近30天</string>
     <string name="last_183_days">近183天</string>

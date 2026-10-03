@@ -55,3 +55,12 @@ Default date/time controls remain Material pickers. Form quantities and monetary
 | Notification | One combined alert per local date, silent existing-notification updates, no repost after dismissal, cancel on recovery or invalid forecasts. No network constraint; Android scheduling may be delayed. | ReminderPolicyTest, ReminderRuntimeTest, real offline reminder harness |
 | Restore | Preserve threshold/time in the backed-up ledger; clear notification opt-in and daily state alongside credentials/installation identity. | BackupRecoveryTest, actual local-transport backup acceptance |
 | Conflict display | A server tombstone is shown as deleted even when its old business value is present. Missing server entity is unavailable; local tombstone is a deletion draft. | ConflictCardTest in Chinese and English |
+
+## V1.3.1 statistics and navigation
+
+| Behavior | Contract | Verification |
+| --- | --- | --- |
+| Range presets | Six wrapping choices. Last30/183 include today through now; all-time has no lower bound and ignores future records. Custom cancellation preserves the prior mode. Keep preceding baselines and later-reading interval attribution. | StatisticsRangeTest, StatisticsScreenChartsTest |
+| Statistics order | Electricity, cold water, hot water on statistics only; DAO and other UI order unchanged. | Pure ordering and rendered-card tests |
+| Long histories | Background, cached statistics; indexed Decimal calculations preserve existing results. Interval canvas <=2400dp, collapsed 240dp lazy details remain selectable through the final item. | StatisticsIndexTest oracle/ten-year fixture, interval UI tests |
+| Predictive back | One root NavHost; each destination owns its complete layout. Main preview/settled chrome and menu bounds match, preserving tab/range/drafts and notification-home behavior. | PredictiveBackTest controlled progress, NavigationGestureAcceptanceTest real OS touches |

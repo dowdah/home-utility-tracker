@@ -106,8 +106,8 @@
     <string name="delete_recharge_message">Delete this recharge and sync the deletion? Consumption will be recalculated; actual readings are kept.</string>
     <string name="no_recharges">No recharges yet. Add an amount and purchase price.</string>
     <string name="linked_conflict">This recharge and its post-credit reading are linked. Either action resolves the entire group.</string>
-    <string name="month_mode">Month</string>
-    <string name="year_mode">Year</string>
+    <string name="month_mode">Calendar month</string>
+    <string name="year_mode">Calendar year</string>
     <string name="custom_mode">Custom</string>
     <string name="last_30_days">Last 30 days</string>
     <string name="last_183_days">Last 183 days</string>

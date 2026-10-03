@@ -94,3 +94,18 @@ python3 tools/reminder_acceptance.py --serial emulator-5554
 ```
 
 Run the command from the repository root. It verifies denied notification permission, real background delivery with airplane mode enabled and Wi-Fi disabled, silent updates, dismissal and process restart. The synthetic test time is near-future; production defaults remain 15:00.
+
+## Statistics ranges and predictive back (1.3.1)
+
+Statistics offers Calendar month, Calendar year, Last 30 days, Last 183 days, All time and Custom. Calendar month remains the default and month/year retain their previous/next controls. Rolling ranges include today: their start is local midnight 29 or 182 dates earlier, and their end is the current instant. All time has no lower bound and displays the earliest active reading/recharge date; tariff history does not define its start. New ranges ignore future readings/recharges. Custom selection changes the active range only when confirmed, and cancelling preserves the previous selection.
+
+The existing later-reading attribution remains: an interval whose later reading is in range contributes its complete recharge-adjusted consumption, including its preceding baseline outside the range. Spending follows recharge dates. Natural-year bars, interval-average trends and bounded daily balance estimates keep their existing meanings. Statistics orders electricity, cold water, hot water independently of other screens. Range/mode choices survive recreation; foreground, date/time-zone and ledger updates refresh rolling ranges.
+
+Long histories compute on a background dispatcher with cached inputs and pre-indexed credits/tariffs. Interval plots have a 2400dp width cap; text intervals are collapsed by default and use a fixed-height lazy list when expanded, preserving access to every detail. Main navigation now belongs entirely to the main destination, so predictive back previews include the same app bar, bottom navigation/landscape rail and padding as the settled page.
+
+```sh
+# Isolated package only, explicit AVD. Handsets additionally require --expected-device-serial.
+python3 tools/navigation_acceptance.py --serial emulator-5554
+```
+
+The navigation harness checks exact executed counts, records synthetic preview/settled screenshots, removes its isolated package and verifies the personal package's version/update timestamp stayed unchanged. Controlled dispatcher progress tests and actual OS edge-touch tests are separate evidence.

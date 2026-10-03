@@ -8,6 +8,8 @@ import java.time.Instant
 import java.time.Duration
 import java.time.ZoneId
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeout
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -36,10 +38,18 @@ class ReminderRuntimeTest {
             device.update {it.copy(enabled=true,notifiedDates=emptySet())}
             // Application observation may have already posted; the same singleton serializes both paths.
             controller.evaluate(now)
+            // NotificationManager enqueues publication; observe the system result rather
+            // than assuming the notification service has processed notify() immediately.
+            withTimeout(5_000) {
+                while (manager.activeNotifications.none {it.id==ReminderController.NOTIFICATION_ID}) delay(50)
+            }
             assertTrue(manager.activeNotifications.any {it.id==ReminderController.NOTIFICATION_ID})
             assertTrue(ReminderDeviceStore(context).state.value.notifiedDates.contains(localDay))
             assertEquals(ReminderAction.UPDATE,controller.evaluate(now))
             manager.cancel(ReminderController.NOTIFICATION_ID)
+            withTimeout(5_000) {
+                while (manager.activeNotifications.any {it.id==ReminderController.NOTIFICATION_ID}) delay(50)
+            }
             assertEquals(ReminderAction.NONE,controller.evaluate(now))
             assertFalse(manager.activeNotifications.any {it.id==ReminderController.NOTIFICATION_ID})
             db.rechargeDao().upsert(RechargeEntity("runtime-credit",id,"200","1","200","CNY",now.plusSeconds(1).toString(),null,false,0))
