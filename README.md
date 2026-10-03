@@ -9,7 +9,7 @@ Home Utility Tracker is a household utility-meter recording and synchronization 
 
 ## Acceptance
 
-- [V1.3.1 acceptance checkpoint](RELEASE-1.3.1-ACCEPTANCE.md) — statistics ranges/order and predictive-back layout; handset acceptance remains pending the owner's readiness.
+- [V1.3.1 acceptance](RELEASE-1.3.1-ACCEPTANCE.md) — statistics ranges/order and predictive-back layout, two-AVD regression and isolated Xiaomi 13 acceptance.
 - [V1.3 acceptance](RELEASE-1.3-ACCEPTANCE.md) — balance forecasts, daily local reminders, two-AVD upgrade/backup/offline notification checks and production notification recovery fix.
 
 - [V1.2 acceptance and operations handoff](RELEASE-1.2-ACCEPTANCE.md) — local and production checks passed, including user-confirmed SMTP delivery and two-AVD periodic synchronization.

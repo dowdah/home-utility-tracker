@@ -108,4 +108,6 @@ Long histories compute on a background dispatcher with cached inputs and pre-ind
 python3 tools/navigation_acceptance.py --serial emulator-5554
 ```
 
-The navigation harness checks exact executed counts, records synthetic preview/settled screenshots, removes its isolated package and verifies the personal package's version/update timestamp stayed unchanged. Controlled dispatcher progress tests and actual OS edge-touch tests are separate evidence.
+The navigation harness checks exact executed counts, records synthetic preview/settled app-window screenshots, removes its isolated package and verifies the personal package's version/update timestamp stayed unchanged. Controlled dispatcher progress tests and actual OS edge-touch tests are separate evidence.
+
+The handset path verifies `--expected-device-serial` before installing. Owner-authorized Xiaomi testing may additionally use `--allow-xiaomi-test-launch --root-test-launch --root-instrumentation`; it applies temporary background-launch permission only to the two isolated packages after cold launch and restores it before uninstalling. Root is an opt-in test-environment workaround, not an application requirement. The harness sets only the isolated app's English baseline for fixtures and never changes the device locale. Another tool holding UiAutomation (such as GKD automation) must be paused with owner authorization and restored afterward. See the [1.3.1 acceptance report](../RELEASE-1.3.1-ACCEPTANCE.md) for the actual handset conditions and untested scope.
