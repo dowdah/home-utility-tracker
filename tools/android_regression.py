@@ -30,6 +30,7 @@ CLASSES = {
     "data.ForecastRepositoryTest": 1,
     "data.ReminderRuntimeTest": 1,
     "ui.ReminderSettingsTest": 1,
+    "ui.PredictiveBackTest": 4,
 }
 
 
