@@ -216,4 +216,5 @@
     <string name="reminder_old_date">Older reading: %1$s</string>
     <string name="reminder_open">Open the app to view estimates.</string>
     <string name="forecast_low">Estimated balance meets your reminder threshold</string>
+    <string name="reading_just_added">Just added</string>
 </resources>

@@ -100,6 +100,16 @@ class AppViewModel @Inject constructor(
         get() = recordFilterState.value
         set(value) { recordFilterState.value = value; savedState["recordFilter"] = value }
 
+    private val pendingReadingRevealState = mutableStateOf<String?>(savedState["pendingReadingRevealId"])
+    var pendingReadingRevealId: String?
+        get() = pendingReadingRevealState.value
+        private set(value) { pendingReadingRevealState.value = value; savedState["pendingReadingRevealId"] = value }
+
+    fun consumeReadingReveal(id: String) {
+        // An older layout acknowledgement must not consume a newer save.
+        if (pendingReadingRevealId == id) pendingReadingRevealId = null
+    }
+
     private val readingEditorOpenState = mutableStateOf(savedState["readingEditorOpen"] ?: false)
     private val readingEditorIdState = mutableStateOf<String?>(savedState["readingEditorId"])
     private val readingMeterIdState = mutableStateOf(savedState["readingMeterId"] ?: "")
@@ -130,10 +140,26 @@ class AppViewModel @Inject constructor(
     fun persistReadingDraft() = viewModelScope.launch {
         if (formBusy) return@launch
         formBusy = true
-        runCatching { repository.saveReading(readingEditorId, readingMeterId, readingValue, readingRecordedAt, readingNote.ifBlank { null }) }
-            .onSuccess { closeReadingEditor(); scheduler.enqueue(); message = "Saved locally" }.onFailure { message = it.message }
-        formBusy = false
+        val draft = ReadingSubmission(readingEditorId, readingMeterId, readingValue, readingRecordedAt, readingNote.ifBlank { null })
+        try {
+            val id = repository.saveReading(draft.id, draft.meterId, draft.value, draft.recordedAt, draft.note)
+            closeReadingEditor()
+            if (draft.id == null) {
+                rechargeTab = false
+                pendingReadingRevealId = id
+            }
+            scheduler.enqueue()
+            message = "Saved locally"
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            message = error.message
+        } finally {
+            formBusy = false
+        }
     }
+
+    private data class ReadingSubmission(val id: String?, val meterId: String, val value: String, val recordedAt: String, val note: String?)
 
     private val tariffEditorOpenState = mutableStateOf(savedState["tariffEditorOpen"] ?: false)
     private val tariffEditorIdState = mutableStateOf<String?>(savedState["tariffEditorId"])
