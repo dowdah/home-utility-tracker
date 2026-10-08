@@ -85,6 +85,7 @@ import com.dowdah.utilitytracker.data.MeterEntity
 import com.dowdah.utilitytracker.data.ReadingEntity
 import com.dowdah.utilitytracker.data.TariffEntity
 import com.dowdah.utilitytracker.data.statisticsForRange
+import com.dowdah.utilitytracker.data.statisticsMeterOrder
 import com.dowdah.utilitytracker.data.remainingReadingIncreases
 import java.time.Instant
 import java.time.LocalDateTime
@@ -117,7 +118,7 @@ fun HomeScreen(viewModel: AppViewModel, forecastViewModel: ForecastViewModel = h
         Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 12.dp).verticalScroll(rememberScrollState())) {
             PersistentSyncSummary(dashboard, conflicts.size, viewModel.message)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                dashboard.meters.forEach { meter ->
+                statisticsMeterOrder(dashboard.meters).forEach { meter ->
                     Column(Modifier.fillMaxWidth(if (columns > 1) .31f else 1f)) {
                         MeterCard(meter, latest[meter.id], 1)
                         forecasts[meter.id]?.let { forecast -> ForecastCard(forecast, forecastState?.first?.let { forecast.isLow(it.setting(meter.id)) } == true) }

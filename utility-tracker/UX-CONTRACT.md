@@ -61,7 +61,7 @@ Default date/time controls remain Material pickers. Form quantities and monetary
 | Behavior | Contract | Verification |
 | --- | --- | --- |
 | Range presets | Six wrapping choices. Last30/183 include today through now; all-time has no lower bound and ignores future records. Custom cancellation preserves the prior mode. Keep preceding baselines and later-reading interval attribution. | StatisticsRangeTest, StatisticsScreenChartsTest |
-| Statistics order | Electricity, cold water, hot water on statistics only; DAO and other UI order unchanged. | Pure ordering and rendered-card tests |
+| Home/statistics order | Electricity, cold water, hot water on Home and Statistics; DAO and other UI order unchanged. Each Home group keeps its actual reading, forecast and monthly summary together. | Pure statistics ordering tests; isolated AVD portrait/landscape Home inspection |
 | Long histories | Background, cached statistics; indexed Decimal calculations preserve existing results. Interval canvas <=2400dp, collapsed 240dp lazy details remain selectable through the final item. | StatisticsIndexTest oracle/ten-year fixture, interval UI tests |
 | Predictive back | One root NavHost; each destination owns its complete layout. Main preview/settled chrome and menu bounds match, preserving tab/range/drafts and notification-home behavior. | PredictiveBackTest controlled progress, NavigationGestureAcceptanceTest real OS touches |
 

@@ -54,7 +54,7 @@ fun resolveStatisticsRange(
     }
 }
 
-/** UI ordering is deliberately local to statistics; storage and the other screens retain their order. */
+/** Shared Home/Statistics display order; storage and other screens retain their existing order. */
 fun statisticsMeterOrder(meters: List<MeterEntity>): List<MeterEntity> = meters.sortedBy {
     when (it.meterType) { "ELECTRICITY" -> 0; "COLD_WATER" -> 1; "HOT_WATER" -> 2; else -> 3 }
 }
