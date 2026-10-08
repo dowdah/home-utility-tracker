@@ -64,3 +64,12 @@ Default date/time controls remain Material pickers. Form quantities and monetary
 | Statistics order | Electricity, cold water, hot water on statistics only; DAO and other UI order unchanged. | Pure ordering and rendered-card tests |
 | Long histories | Background, cached statistics; indexed Decimal calculations preserve existing results. Interval canvas <=2400dp, collapsed 240dp lazy details remain selectable through the final item. | StatisticsIndexTest oracle/ten-year fixture, interval UI tests |
 | Predictive back | One root NavHost; each destination owns its complete layout. Main preview/settled chrome and menu bounds match, preserving tab/range/drafts and notification-home behavior. | PredictiveBackTest controlled progress, NavigationGestureAcceptanceTest real OS touches |
+
+## V1.3.2 saved reading visibility and identity
+
+| Behavior | Contract | Verification |
+| --- | --- | --- |
+| New reading | Freeze the submitted draft; atomic local save returns its ID. Wait for the Room visible list, reveal the exact ID (including backfills/ties), and highlight for about 2 seconds with localized accessibility state. | ReadingRevealTest actual form and viewport assertions |
+| Filters and scrolling | Keep All or a matching meter; switch an incompatible filter to the saved meter. Empty state uses the same filtered list. Stable keys remain; edits, deletions, sync acknowledgements and remote additions do not request a reveal. | ReadingRevealTest filters/empty/remote/edit/delete |
+| Recovery | Preserve failed input without requesting a reveal. Store an unconsumed request in SavedStateHandle; consume only its matching ID once visible. Form and visible list survive Activity recreation. | ReadingRevealTest delayed transaction/new ViewModel; ReadingActivityTest full Activity |
+| App icon | Original droplet with transparent lightning, light/dark color resources, adaptive foreground/background, dedicated monochrome and density fallbacks. Splash inherits the mark. Actual themed coloring is launcher-dependent. | LauncherIconTest resource rendering and separate launcher inspection |

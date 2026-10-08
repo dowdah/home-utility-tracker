@@ -1,6 +1,6 @@
 # Utility Tracker Android
 
-An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.3 adds separate balance forecasts and local daily reminders, alongside backup/restore protection, offline CSV exports and cross-device synchronization.
+An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.3.2 adds immediate visibility for locally saved readings and light/dark adaptive icons, alongside separate balance forecasts, local reminders, backup/restore, offline CSV and cross-device synchronization.
 
 ## Reading and recharge accounting
 
@@ -17,8 +17,8 @@ Consumption and its cost follow the later reading date. Pricing requires tariff 
 - Material 3, dynamic colors and system light/dark modes; English and Chinese resources.
 - Portrait bottom navigation and landscape rail. Drafts, filters and selected periods survive configuration changes.
 - Home shows actual latest readings, age, monthly consumption/cost/spending, pending changes, conflicts and last successful synchronization.
-- Records offers readings/recharges and per-meter filters. Forms use the shared meter selector and Material date/time pickers; errors preserve entered values.
-- Statistics offers month, year and custom ranges. Month/custom consumption charts connect each interval's average per elapsed 24-hour day at its later reading date; the line is a trend, not actual daily use. Yearly consumption uses monthly bars. Each meter also shows daily remaining quantities: the last reading on a reading day is measured, and unmeasured days are labeled linear day-end estimates only between two readings, accounting for recorded recharge times. No balance is projected beyond the latest reading. Text details accompany both charts; unknown values remain gaps.
+- Records offers readings/recharges and per-meter filters. A successful new reading scrolls to that exact local record and highlights it for about two seconds, including backdated entries. All remains selected; a filter that hides the saved meter switches to that meter. Edits and synchronization updates retain the current scroll position. Forms use the shared meter selector and Material date/time pickers; errors preserve entered values.
+- Statistics offers calendar month/year, last 30/183 local dates, all time and custom ranges. Month/custom consumption charts connect each interval's average per elapsed 24-hour day at its later reading date; the line is a trend, not actual daily use. Yearly consumption uses monthly bars. Each meter also shows daily remaining quantities: the last reading on a reading day is measured, and unmeasured days are labeled linear day-end estimates only between two readings, accounting for recorded recharge times. No balance is projected beyond the latest reading. Text details accompany both charts; unknown values remain gaps.
 - Settings manages tariff history, conflicts, backend endpoints and SAF exports of readings, recharges or tariffs.
 
 ## Synchronization and data protection
@@ -111,3 +111,19 @@ python3 tools/navigation_acceptance.py --serial emulator-5554
 The navigation harness checks exact executed counts, records synthetic preview/settled app-window screenshots, removes its isolated package and verifies the personal package's version/update timestamp stayed unchanged. Controlled dispatcher progress tests and actual OS edge-touch tests are separate evidence.
 
 The handset path verifies `--expected-device-serial` before installing. Owner-authorized Xiaomi testing may additionally use `--allow-xiaomi-test-launch --root-test-launch --root-instrumentation`; it applies temporary background-launch permission only to the two isolated packages after cold launch and restores it before uninstalling. Root is an opt-in test-environment workaround, not an application requirement. The harness sets only the isolated app's English baseline for fixtures and never changes the device locale. Another tool holding UiAutomation (such as GKD automation) must be paused with owner authorization and restored afterward. See the [1.3.1 acceptance report](../RELEASE-1.3.1-ACCEPTANCE.md) for the actual handset conditions and untested scope.
+
+## Reading feedback and launcher icon (1.3.2)
+
+Saving returns the ID committed with its outbox operation. The UI waits for that ID in the Room-backed visible list, requests one scroll, and consumes the reveal only when the row is visible. Pending reveals and form drafts survive Activity recreation; synchronization never creates reveal requests. The highlight exposes a localized accessibility state and live-region announcement.
+
+The original water-drop/lightning icon uses vector adaptive foreground/background layers, light/dark palette resources, a transparent lightning cutout and a dedicated monochrome layer. Density fallbacks are included. Android's splash screen inherits the launcher icon. Themed coloring requires a supporting launcher with themed icons enabled; launcher caches may delay appearance changes. No launcher-data reset is required or performed.
+
+[Icon previews](artwork/launcher-preview.png) show both palettes, circular/rounded masks, a sample monochrome tint and 48/32/24px sizes. `artwork/launcher-mark.svg` is the native vector source; `tools/generate_launcher_icons.cjs` regenerates resources and previews using Node.js and `sharp`.
+
+```sh
+# Run from repository root; installs and removes only the isolated .acceptancev132 package.
+python3 tools/reading_acceptance.py --serial emulator-5554
+python3 tools/reading_acceptance.py --serial emulator-5556
+```
+
+The handset path uses the same explicitly verified identity and optional OEM test-launch workarounds as navigation acceptance. See the [1.3.2 acceptance record](../RELEASE-1.3.2-ACCEPTANCE.md) for actual execution and outstanding gates.

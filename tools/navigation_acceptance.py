@@ -5,6 +5,7 @@ The personal application is never installed, stopped or cleared. Screenshots con
 only the isolated application's synthetic records and are kept in a private temp folder.
 """
 import argparse
+import hashlib
 import json
 import re
 import shlex
@@ -32,7 +33,12 @@ def run(command, **kwargs):
     return result.stdout.strip()
 
 
-def main():
+def main(*, package=PACKAGE, classes=CLASSES, build_suffix=".acceptancev131",
+         report_prefix="utility-v131-navigation-",
+         default_classes=("ui.PredictiveBackTest", "ui.NavigationGestureAcceptanceTest"),
+         require_gestures=True):
+    if not re.fullmatch(r"com\.dowdah\.utilitytracker\.acceptance[a-z0-9]*", package):
+        raise ValueError("Only isolated acceptance package names are allowed")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", required=True)
     parser.add_argument("--expected-device-serial", help="Required for a handset: independently verified ro.serialno")
@@ -43,7 +49,7 @@ def main():
     parser.add_argument("--root-instrumentation", action="store_true",
                         help="Launch only this isolated instrumentation as owner-authorized root to bypass OEM background-start restrictions")
     parser.add_argument("--skip-build", action="store_true")
-    parser.add_argument("--class-name", action="append", choices=CLASSES, help="Run selected isolated test classes; default is deterministic and real gestures")
+    parser.add_argument("--class-name", action="append", choices=classes, help="Run selected isolated test classes; default is deterministic and real gestures")
     args = parser.parse_args()
     emulator = bool(re.fullmatch(r"emulator-\d+", args.serial))
     adb = ["adb", "-s", args.serial]
@@ -53,21 +59,26 @@ def main():
     if (args.root_test_launch or args.root_instrumentation) and shell("su", "-c", "id -u") != "0":
         raise RuntimeError("Owner-authorized root is unavailable")
     privileged = lambda *parts: shell("su", "-c", shlex.join(parts)) if args.root_test_launch else shell(*parts)
-    if shell("settings", "get", "secure", "navigation_mode") != "2":
+    if require_gestures and shell("settings", "get", "secure", "navigation_mode") != "2":
         raise RuntimeError("Gesture navigation is required; device navigation settings were not changed")
     if not args.skip_build:
-        run([str(ROOT / "utility-tracker/gradlew"), "-p", str(ROOT / "utility-tracker"), "-PacceptanceSuffix=.acceptancev131", ":app:assembleAcceptance", ":app:assembleAcceptanceAndroidTest"], timeout=600)
+        run([str(ROOT / "utility-tracker/gradlew"), "-p", str(ROOT / "utility-tracker"), "-PacceptanceSuffix=" + build_suffix, ":app:assembleAcceptance", ":app:assembleAcceptanceAndroidTest"], timeout=600)
     apk = ROOT / "utility-tracker/app/build/outputs/apk/acceptance/app-acceptance.apk"
     test = ROOT / "utility-tracker/app/build/outputs/apk/androidTest/acceptance/app-acceptance-androidTest.apk"
-    if json.loads((apk.parent / "output-metadata.json").read_text())["applicationId"] != PACKAGE:
+    metadata = json.loads((apk.parent / "output-metadata.json").read_text())
+    if metadata["applicationId"] != package or json.loads((test.parent / "output-metadata.json").read_text())["applicationId"] != package + ".test":
         raise RuntimeError("Wrong isolated APK namespace")
-    if shell("pm", "list", "packages", PACKAGE):
+    if shell("pm", "list", "packages", package):
         raise RuntimeError("Isolated package already exists; inspect prior run before overwriting it")
-    work = Path(tempfile.mkdtemp(prefix="utility-v131-navigation-"))
+    work = Path(tempfile.mkdtemp(prefix=report_prefix))
     work.chmod(0o700)
     baseline = shell("dumpsys", "package", "com.dowdah.utilitytracker")
     baseline = [line.strip() for line in baseline.splitlines() if any(k in line for k in ("versionCode=", "versionName=", "lastUpdateTime="))]
-    report = {"serial": args.serial, "package": PACKAGE, "classes": [], "completed": False, "personal_package_before": baseline}
+    report = {"serial": args.serial, "package": package, "classes": [], "completed": False, "personal_package_before": baseline}
+    report["apk_sha256"] = hashlib.sha256(apk.read_bytes()).hexdigest()
+    report["test_apk_sha256"] = hashlib.sha256(test.read_bytes()).hexdigest()
+    report["version"] = {key: metadata["elements"][0][key] for key in ("versionCode", "versionName")}
+    report["expected_tests"] = sum(classes[name] for name in args.class_name or default_classes)
     report["root_test_launch"] = args.root_test_launch
     report["instrumentation_identity"] = "root" if args.root_instrumentation else "shell"
     launch_modes = {}
@@ -77,11 +88,11 @@ def main():
         run(adb + ["install", "-r", "-t", str(test)], timeout=120)
         # Fixtures with English assertions need a reproducible app-local baseline.
         # Locale-combination tests override it explicitly; device locale is untouched.
-        shell("cmd", "locale", "set-app-locales", PACKAGE, "--user", "0", "--locales", "en")
+        shell("cmd", "locale", "set-app-locales", package, "--user", "0", "--locales", "en")
         report["isolated_locale_baseline"] = "en"
         # Verify cold launch explicitly before instrumentation, including on handset
         # firmware that restricts a freshly installed application's background launch.
-        launch = shell("am", "start", "-W", "-n", PACKAGE + "/com.dowdah.utilitytracker.MainActivity")
+        launch = shell("am", "start", "-W", "-n", package + "/com.dowdah.utilitytracker.MainActivity")
         (work / "launch.txt").write_text(launch)
         if "Status: ok" not in launch:
             raise RuntimeError("Isolated application did not launch: " + launch)
@@ -91,7 +102,7 @@ def main():
         if args.allow_xiaomi_test_launch:
             if emulator:
                 raise RuntimeError("Xiaomi launch override is only for a verified handset")
-            for target in (PACKAGE, PACKAGE + ".test"):
+            for target in (package, package + ".test"):
                 # Xiaomi's get-with-op filter omits vendor operations; inspect the
                 # isolated package's complete policy to verify this vendor op.
                 previous = privileged("cmd", "appops", "get", target)
@@ -105,15 +116,15 @@ def main():
                 if not re.search(r"MIUIOP\(10021\): allow\b", allowed):
                     raise RuntimeError("Xiaomi isolated launch permission did not become allowed")
             report["temporary_isolated_launch_modes"] = launch_modes.copy()
-        for name in args.class_name or ["ui.PredictiveBackTest", "ui.NavigationGestureAcceptanceTest"]:
+        for name in args.class_name or default_classes:
             if not re.fullmatch(r"(?:ui|data)\.[A-Za-z0-9]+Test", name):
                 raise ValueError("Unexpected test class")
             command = ["am", "instrument", "-w", "-r", "-e", "class", "com.dowdah.utilitytracker." + name,
-                       "-e", "real_gestures", "true", PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner"]
+                       "-e", "real_gestures", "true", package + ".test/androidx.test.runner.AndroidJUnitRunner"]
             output = shell("su", "-c", shlex.join(command)) if args.root_instrumentation else shell(*command)
             (work / (name + ".txt")).write_text(output)
             matched = re.search(r"OK \((\d+) tests?\)", output)
-            if not matched or int(matched.group(1)) != CLASSES[name] or "INSTRUMENTATION_STATUS_CODE: -3" in output:
+            if not matched or int(matched.group(1)) != classes[name] or "INSTRUMENTATION_STATUS_CODE: -3" in output:
                 raise RuntimeError(output[-7000:])
             report["classes"].append({"name": name, "tests": int(matched.group(1)), "passed": True})
             print(f"Passed {name}: {matched.group(1)}", flush=True)
@@ -122,7 +133,7 @@ def main():
             time.sleep(2)
         report["completed"] = True
     finally:
-        subprocess.run(adb + ["pull", f"/sdcard/Android/data/{PACKAGE}/files", str(work / "screenshots")], capture_output=True)
+        subprocess.run(adb + ["pull", f"/sdcard/Android/data/{package}/files", str(work / "screenshots")], capture_output=True)
         for target, previous in launch_modes.items():
             privileged("cmd", "appops", "set", target, "10021", previous)
             restored = privileged("cmd", "appops", "get", target)
@@ -132,7 +143,7 @@ def main():
         report["isolated_launch_modes_restored"] = not report.get("cleanup_error", False)
         after = shell("dumpsys", "package", "com.dowdah.utilitytracker")
         report["personal_package_unchanged"] = baseline == [line.strip() for line in after.splitlines() if any(k in line for k in ("versionCode=", "versionName=", "lastUpdateTime="))]
-        for target in (PACKAGE + ".test", PACKAGE):
+        for target in (package + ".test", package):
             result = subprocess.run(adb + ["uninstall", target], capture_output=True, text=True)
             if result.returncode and shell("pm", "list", "packages", target):
                 report["cleanup_error"] = True

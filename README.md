@@ -9,6 +9,8 @@ Home Utility Tracker is a household utility-meter recording and synchronization 
 
 ## Acceptance
 
+- [V1.3.2 acceptance](RELEASE-1.3.2-ACCEPTANCE.md) — immediate saved-reading visibility and adaptive water/electricity icons, two AVDs and isolated Xiaomi 13 acceptance.
+
 - [V1.3.1 acceptance](RELEASE-1.3.1-ACCEPTANCE.md) — statistics ranges/order and predictive-back layout, two-AVD regression and isolated Xiaomi 13 acceptance.
 - [V1.3 acceptance](RELEASE-1.3-ACCEPTANCE.md) — balance forecasts, daily local reminders, two-AVD upgrade/backup/offline notification checks and production notification recovery fix.
 
