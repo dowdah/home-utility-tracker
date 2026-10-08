@@ -129,7 +129,11 @@ def test_unsent_fault_that_recovers_does_not_send_obsolete_mail(tmp_path):
         state, [], config, now=now + timedelta(minutes=10), sender=lambda *args: sent.append(args)
     )
     assert sent == []
-    assert notifications.public_status(state)["pending_event_count"] == 0
+    status = notifications.public_status(state)
+    assert status["pending_event_count"] == 0
+    assert status["last_error_code"] is None
+    assert status["last_success_at"] is None
+    assert status["last_attempt_at"] == now.isoformat()
 
 
 @pytest.mark.parametrize("security,port", [("starttls", "587"), ("ssl", "465")])
@@ -384,3 +388,127 @@ def test_status_never_echoes_unknown_text_from_corrupt_state(tmp_path):
     status = notifications.public_status(tmp_path)
     assert status["last_error_code"] == "notification_state_unreadable"
     assert "fixture-private-password" not in json.dumps(status)
+
+
+def test_failed_delivery_waits_for_two_healthy_checks_and_survives_legacy_reload(tmp_path):
+    config = config_file(tmp_path)
+    now = datetime(2026, 10, 2, tzinfo=UTC)
+    state = tmp_path / "state"
+
+    def fail(*args):
+        raise TimeoutError()
+
+    process_notifications(state, ["service_unavailable"], config, now=now, sender=fail)
+    path = state / "notifications.json"
+    saved = json.loads(path.read_text())
+    del saved["failed_events"]
+    path.write_text(json.dumps(saved))
+    first = process_notifications(state, [], config, now=now + timedelta(minutes=1), sender=fail)
+    assert first["last_error_code"] == "smtp_timeout"
+    assert (
+        json.loads(path.read_text())["next_attempt_at"] == (now + timedelta(minutes=5)).isoformat()
+    )
+    second = process_notifications(state, [], config, now=now + timedelta(minutes=2), sender=fail)
+    assert second["last_error_code"] is None
+    assert second["last_success_at"] is None
+    assert json.loads(path.read_text())["next_attempt_at"] is None
+
+
+def test_cancelled_failure_does_not_clear_another_pending_delivery(tmp_path):
+    config = config_file(tmp_path)
+    now = datetime(2026, 10, 2, tzinfo=UTC)
+    state = tmp_path / "state"
+    calls = []
+
+    def fail(config, events, at):
+        calls.append(events)
+        raise TimeoutError()
+
+    process_notifications(
+        state, ["service_unavailable", "backup_overdue"], config, now=now, sender=fail
+    )
+    for minute in (1, 2):
+        status = process_notifications(
+            state, ["backup_overdue"], config, now=now + timedelta(minutes=minute), sender=fail
+        )
+    assert status["last_error_code"] == "smtp_timeout"
+    assert status["pending_event_count"] == 1
+    assert len(calls) == 1
+    delivered = []
+    status = process_notifications(
+        state,
+        ["backup_overdue"],
+        config,
+        now=now + timedelta(minutes=5),
+        sender=lambda config, events, at: delivered.append(events),
+    )
+    assert delivered == [{"backup_overdue": "fault"}]
+    assert status["last_error_code"] is None
+
+
+def test_corrected_configuration_clears_old_error_without_inventing_delivery(tmp_path):
+    config = config_file(tmp_path, SMTP_PORT="invalid")
+    state = tmp_path / "state"
+    status = process_notifications(state, [], config)
+    assert status["last_error_code"] == "configuration_invalid"
+    config_file(tmp_path)
+    status = process_notifications(
+        state, [], config, sender=lambda *args: pytest.fail("No mail due")
+    )
+    assert status["last_error_code"] is None
+    assert status["last_success_at"] is None
+
+
+def test_monitor_clears_cancelled_delivery_error(service, tmp_path, monkeypatch):
+    config = config_file(tmp_path)
+    monkeypatch.setattr(
+        monitor,
+        "storage_status",
+        lambda service: {"checked_at": datetime.now(UTC).isoformat(), "alerts": []},
+    )
+    monkeypatch.setattr(
+        monitor, "_unit_property", lambda unit, prop: "success" if prop == "Result" else "active"
+    )
+
+    def fail(*args):
+        raise TimeoutError()
+
+    process_notifications(
+        service.settings.monitor_state_dir, ["service_unavailable"], config, sender=fail
+    )
+    monkeypatch.setattr(notifications, "send_email", lambda *args: pytest.fail("No obsolete mail"))
+    first = monitor.run_monitor(service, notifications_file=config)
+    assert "notification_delivery_failed" in first["alerts"]
+    second = monitor.run_monitor(service, notifications_file=config)
+    assert "notification_delivery_failed" not in second["alerts"]
+    assert second["notifications"]["last_success_at"] is None
+
+
+def test_cancelled_failure_clears_even_with_an_unrelated_notified_incident(tmp_path):
+    config = config_file(tmp_path)
+    now = datetime(2026, 10, 2, tzinfo=UTC)
+    state = tmp_path / "state"
+    process_notifications(state, ["backup_overdue"], config, now=now, sender=lambda *args: None)
+
+    def fail(*args):
+        raise TimeoutError()
+
+    process_notifications(
+        state,
+        ["backup_overdue", "service_unavailable"],
+        config,
+        now=now + timedelta(minutes=5),
+        sender=fail,
+    )
+    for minute in (6, 7):
+        status = process_notifications(
+            state,
+            ["backup_overdue"],
+            config,
+            now=now + timedelta(minutes=minute),
+            sender=fail,
+        )
+    assert status["last_error_code"] is None
+    assert status["last_success_at"] == now.isoformat()
+    assert status["pending_event_count"] == 0
+    assert "backup_overdue" in json.loads((state / "notifications.json").read_text())["incidents"]

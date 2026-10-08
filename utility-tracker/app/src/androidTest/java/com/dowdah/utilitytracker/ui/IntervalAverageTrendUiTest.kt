@@ -1,7 +1,6 @@
 package com.dowdah.utilitytracker.ui
 
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -16,9 +15,11 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.percentOffset
 import androidx.compose.ui.unit.dp
@@ -72,6 +73,9 @@ class IntervalAverageTrendUiTest {
                 compose.runOnIdle { Locale.setDefault(case.locale); state.value = case }
                 compose.waitForIdle()
                 compose.onNodeWithTag("interval_average_chart").assertExists()
+                if (compose.onAllNodesWithTag("interval_values").fetchSemanticsNodes().isEmpty()) {
+                    compose.onNodeWithTag("interval_values_toggle").performScrollTo().performClick()
+                }
                 compose.onNodeWithTag("interval_item_0").performClick()
                 compose.onNodeWithTag("interval_detail").assertExists()
                 compose.onNodeWithText(if (case.locale.language == "zh") "区间日均消耗（kWh/天）" else "Interval average consumption (kWh/day)").assertExists()
@@ -103,7 +107,27 @@ class IntervalAverageTrendUiTest {
                 }
             }
         }
-        compose.onNodeWithTag("interval_item_14").performScrollTo().performClick()
+        compose.onNodeWithTag("interval_values_toggle").performScrollTo().performClick()
+        compose.onNodeWithTag("interval_values").performScrollToIndex(14)
+        compose.onNodeWithTag("interval_item_14").performClick()
+        compose.onNodeWithTag("interval_detail").assertExists()
+    }
+
+    @Test fun tenYearIntervalsStayCollapsedAndLastDetailRemainsReachable() {
+        val start = java.time.Instant.parse("2016-01-01T12:00:00Z")
+        val rows = (0..3653).map { day -> reading("r$day", start.plusSeconds(day * 86_400L).toString(), (10_000 - day).toString()) }
+        val points = intervalTrendForRange(rows, emptyList(), null, null)
+        compose.setContent {
+            UtilityTrackerTheme { Surface(Modifier.fillMaxSize()) {
+                Column(Modifier.safeDrawingPadding().verticalScroll(rememberScrollState())) { IntervalAverageTrend(points, "kWh") }
+            } }
+        }
+        compose.onNodeWithTag("interval_values").assertDoesNotExist()
+        compose.onNodeWithTag("interval_item_0").assertDoesNotExist()
+        compose.onNodeWithTag("interval_values_toggle").performScrollTo().performClick()
+        compose.onNodeWithTag("interval_item_${points.lastIndex}").assertDoesNotExist()
+        compose.onNodeWithTag("interval_values").performScrollToIndex(points.lastIndex)
+        compose.onNodeWithTag("interval_item_${points.lastIndex}").performClick()
         compose.onNodeWithTag("interval_detail").assertExists()
     }
 
@@ -115,20 +139,17 @@ class IntervalAverageTrendUiTest {
             reading("d", "2026-09-03T12:00:00Z", "110"),
         ), emptyList(), null, null)
         compose.setContent { UtilityTrackerTheme { IntervalAverageTrend(points, "kWh") } }
+        compose.onNodeWithTag("interval_values_toggle").performClick()
         compose.onNodeWithText("Cannot calculate: recorded recharges do not explain the increased balance.").assertExists()
         compose.onNodeWithText("0 kWh/day").assertExists()
+        compose.onNodeWithTag("interval_values").performScrollToIndex(2)
         compose.onNodeWithText("Cannot calculate a daily average: the readings have the same time.").assertExists()
     }
 
     private fun reading(id: String, at: String, remaining: String) =
         ReadingEntity(id, "electric", remaining, at, null, false, 1)
 
-    private fun screenshot(name: String) {
-        val bitmap = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
-        java.io.File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null), "$name.png")
-            .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        bitmap.recycle()
-    }
+    private fun screenshot(name: String) = captureIsolatedWindow(name)
 
     private data class DisplayCase(val locale: Locale, val landscape: Boolean, val dark: Boolean)
 }

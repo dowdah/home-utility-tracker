@@ -15,16 +15,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 PACKAGE = "com.dowdah.utilitytracker.acceptanceregression"
 CLASSES = {
-    "data.DatabaseMigrationTest": 1,
+    "data.DatabaseMigrationTest": 2,
     "data.LedgerRepositoryTest": 8,
     "data.BackupRecoveryTest": 2,
     "data.OfflineExportTest": 1,
     "data.WorkSchedulerTest": 1,
     "data.RechargeFormTest": 2,
-    "ui.StatisticsScreenChartsTest": 1,
+    "ui.ReadingRevealTest": 8,
+    "ui.ReadingActivityTest": 2,
+    "ui.LauncherIconTest": 2,
+    "ui.StatisticsScreenChartsTest": 3,
     "ui.DailyRemainingUiTest": 3,
-    "ui.IntervalAverageTrendUiTest": 4,
+    "ui.IntervalAverageTrendUiTest": 5,
     "ui.ExportUiAcceptanceTest": 1,
+    "ui.ConflictCardTest": 1,
+    "ui.ForecastCardTest": 1,
+    "data.ForecastRepositoryTest": 1,
+    "data.ReminderRuntimeTest": 1,
+    "ui.ReminderSettingsTest": 1,
+    "ui.PredictiveBackTest": 4,
+    "ui.StatisticsLongHistoryTest": 1,
 }
 
 
@@ -39,6 +49,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--serial", required=True)
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--class-name", action="append", choices=CLASSES,
+                        help="Run only selected classes after a failed check; default is the complete suite")
     args = parser.parse_args()
     if not re.fullmatch(r"emulator-\d+", args.serial):
         parser.error("Use an explicit emulator serial")
@@ -51,12 +63,15 @@ def main():
     test = ROOT / "utility-tracker/app/build/outputs/apk/androidTest/acceptance/app-acceptance-androidTest.apk"
     adb = ["adb", "-s", args.serial]
     directory = Path(tempfile.mkdtemp(prefix="utility-v12-regression-"))
-    report = {"serial": args.serial, "package": PACKAGE, "classes": [], "completed": False}
+    selected = args.class_name or list(CLASSES)
+    report = {"serial": args.serial, "package": PACKAGE, "classes": [], "completed": False,
+              "expected_tests": sum(CLASSES[name] for name in selected)}
     print(f"Report directory: {directory}", flush=True)
     try:
         run(adb + ["install", "-r", str(apk)])
         run(adb + ["install", "-r", "-t", str(test)])
-        for name, count in CLASSES.items():
+        for name in selected:
+            count = CLASSES[name]
             command = ["am", "instrument", "-w", "-r", "-e", "class", "com.dowdah.utilitytracker." + name,
                        PACKAGE + ".test/androidx.test.runner.AndroidJUnitRunner"]
             output = run(adb + ["shell", shlex.join(command)], timeout=300)

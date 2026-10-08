@@ -14,11 +14,13 @@ import com.dowdah.utilitytracker.sync.SyncScheduler
 class UtilityTrackerApplication : Application(), Configuration.Provider {
     @Inject lateinit var workerFactory: HiltWorkerFactory
     @Inject lateinit var scheduler: SyncScheduler
+    @Inject lateinit var reminders: com.dowdah.utilitytracker.reminders.ReminderCoordinator
     override fun onCreate() {
         super.onCreate()
         scheduler.ensurePeriodic()
+        reminders.start()
         ProcessLifecycleOwner.get().lifecycle.addObserver(object : DefaultLifecycleObserver {
-            override fun onStart(owner: LifecycleOwner) { scheduler.onForeground() }
+            override fun onStart(owner: LifecycleOwner) { scheduler.onForeground(); reminders.onForeground() }
         })
     }
     override val workManagerConfiguration: Configuration

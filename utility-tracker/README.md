@@ -1,6 +1,6 @@
 # Utility Tracker Android
 
-An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.2 adds explicit backup/restore protection, local offline CSV exports and scheduled cross-device synchronization to the recharge ledger and statistics.
+An offline-first household ledger for remaining electricity (kWh), cold water (t), and hot water (t). Version 1.3.2 adds immediate visibility for locally saved readings and light/dark adaptive icons, alongside separate balance forecasts, local reminders, backup/restore, offline CSV and cross-device synchronization.
 
 ## Reading and recharge accounting
 
@@ -16,9 +16,9 @@ Consumption and its cost follow the later reading date. Pricing requires tariff 
 
 - Material 3, dynamic colors and system light/dark modes; English and Chinese resources.
 - Portrait bottom navigation and landscape rail. Drafts, filters and selected periods survive configuration changes.
-- Home shows actual latest readings, age, monthly consumption/cost/spending, pending changes, conflicts and last successful synchronization.
-- Records offers readings/recharges and per-meter filters. Forms use the shared meter selector and Material date/time pickers; errors preserve entered values.
-- Statistics offers month, year and custom ranges. Month/custom consumption charts connect each interval's average per elapsed 24-hour day at its later reading date; the line is a trend, not actual daily use. Yearly consumption uses monthly bars. Each meter also shows daily remaining quantities: the last reading on a reading day is measured, and unmeasured days are labeled linear day-end estimates only between two readings, accounting for recorded recharge times. No balance is projected beyond the latest reading. Text details accompany both charts; unknown values remain gaps.
+- Home shows actual latest readings, age, monthly consumption/cost/spending, pending changes, conflicts and last successful synchronization. Meter groups follow electricity, cold water, hot water, matching Statistics.
+- Records offers readings/recharges and per-meter filters. A successful new reading scrolls to that exact local record and highlights it for about two seconds, including backdated entries. All remains selected; a filter that hides the saved meter switches to that meter. Edits and synchronization updates retain the current scroll position. Forms use the shared meter selector and Material date/time pickers; errors preserve entered values.
+- Statistics offers calendar month/year, last 30/183 local dates, all time and custom ranges. Month/custom consumption charts connect each interval's average per elapsed 24-hour day at its later reading date; the line is a trend, not actual daily use. Yearly consumption uses monthly bars. Each meter also shows daily remaining quantities: the last reading on a reading day is measured, and unmeasured days are labeled linear day-end estimates only between two readings, accounting for recorded recharge times. No balance is projected beyond the latest reading. Text details accompany both charts; unknown values remain gaps.
 - Settings manages tariff history, conflicts, backend endpoints and SAF exports of readings, recharges or tariffs.
 
 ## Synchronization and data protection
@@ -27,7 +27,7 @@ Room is the UI source. Entity changes and outbox operations are committed in one
 
 A real conflict preserves the latest local draft and refreshes the authoritative server snapshot. Keep-server and override-server resolve complete linked groups; overrides use new IDs and current base revisions. `batch_aborted` remains queued. Low server space retains local work while permitting pulls. Authentication, validation, version and identity problems remain visible instead of retrying blindly.
 
-Protocol 2 is required on both client and server. An incompatible peer preserves the local queue and requests an upgrade. Room schema 1 upgrades to 2 with explicit migration and exported schemas; destructive migration is disabled. Per-installation tokens remain encrypted with Android Keystore and are not included in CSV or logs.
+Protocol 2 is required on both client and server. An incompatible peer preserves the local queue and requests an upgrade. Room schemas 1 and 2 upgrade to 3 with explicit migrations and exported schemas; destructive migration is disabled. Per-installation tokens remain encrypted with Android Keystore and are not included in CSV or logs.
 
 Every configured endpoint must identify the same backend instance. HTTP is permitted for local/LAN testing with a visible plaintext-token warning; production should use HTTPS. Health checks validate service/database availability, including read-only degraded operation. Activation authenticates `/api/v1/meta`; server operational details require `/api/v1/status` authentication.
 
@@ -52,7 +52,7 @@ Production acceptance additionally requires explicit `--mode production --endpoi
 
 `tools/deploy_backend.py` stages a committed backend revision, rehearses additive migration on an online SQLite copy, preserves original-row hashes and old source, and verifies backup/monitor tasks. Read its arguments and the acceptance report before using it on a live host. After new writes, rollback must preserve the current ledger and prefer a forward fix.
 
-The build uses AGP built-in Kotlin and its new DSL with KSP 2.3.6, Hilt 2.59.2 and Kotlin/Compose/serialization plugins 2.2.21. The old KAPT and AGP compatibility flags are removed. Room schema 2 and its 1→2 migration remain unchanged. Never commit tokens, private device databases, exported personal ledgers or production credentials.
+The build uses AGP built-in Kotlin and its new DSL with KSP 2.3.6, Hilt 2.59.2 and Kotlin/Compose/serialization plugins 2.2.21. The old KAPT and AGP compatibility flags are removed. Room schema 3 adds local reminder settings; both 1→2→3 and 2→3 migrations preserve the ledger. Never commit tokens, private device databases, exported personal ledgers or production credentials.
 
 ## Android backup and restore (1.2)
 
@@ -77,3 +77,53 @@ The chosen source/type is frozen while the system document picker is open and su
 One unique, network-constrained WorkManager job schedules a periodic pull every 15 minutes, with a 15-minute initial delay; Android can delay execution. Registration uses UPDATE and preserves job identity. Opening/returning to the app triggers an immediate pass, with repeated foreground events debounced for 60 seconds. Saving records, activating endpoints, configuring tokens and manual refresh trigger immediate work. Missing endpoint/token configuration produces a visible prompt without network requests. All paths share the repository mutex and retain immutable retries and grouped conflicts.
 
 `tools/live_acceptance.py --mode local --include-periodic` adds a real timer observation to the two-device ledger acceptance. It creates a record on A and verifies B receives it while backgrounded through a delayed periodic worker, without a manual pull.
+
+## Balance forecasts and local reminders (1.3)
+
+Home keeps actual reading values/timestamps and displays a separate estimated current balance and days remaining. Forecasts never create readings or change historical charts, consumption totals or exports. Electricity uses approximately 30 days of complete intervals ending at the latest reading, with at least 24 hours of history; water uses 180 days, with at least seven days. The full boundary interval is retained. Mean use is total recharge-adjusted consumption divided by total elapsed time, not an average of interval rates. The estimate adds subsequent recorded recharges and subtracts projected consumption since the last reading.
+
+Older invalid intervals stop the usable continuous history. The latest invalid interval, ambiguous equal-time readings, future readings and unresolved reading/recharge conflicts block the affected meter. Pending local work is included. Electricity readings are marked old after seven days and expire after 30; water readings are marked old after 30 days and expire after 90. Recharges never reset actual-reading age. Zero observed use has no finite days estimate; valid quantity thresholds still work. Exhaustion is explicitly a projection requiring verification.
+
+Settings → Balance reminders enables phone notifications and requests Android permission only on an explicit user action. Each meter defaults to a seven-day threshold, with an optional non-negative quantity threshold; either can trigger a reminder. The daily time defaults to 15:00 and is editable. All low meters share one notification per device-local calendar day. Repeat evaluations silently update an existing notification; dismissing it does not cause another notification that day. Recovery removes the affected meter. Notification permission denial does not disable forecasts or settings.
+
+An independent network-unconstrained hourly WorkManager task and a delayed check for the selected time evaluate local snapshots, including while offline. Foreground entry, ledger/conflict changes and settings changes also trigger evaluation. Android can delay execution; a force-stopped app must be reopened. This is not an exact alarm or a server push service. Thresholds/time are local Room settings included in ledger backups; notification opt-in and recent notified dates live in noBackupFilesDir. Restore requires opting in again. Settings and deduplication do not sync across devices.
+
+```sh
+# Explicit AVD only; installs/removes a separate acceptance package and restores network state.
+python3 tools/reminder_acceptance.py --serial emulator-5554
+```
+
+Run the command from the repository root. It verifies denied notification permission, real background delivery with airplane mode enabled and Wi-Fi disabled, silent updates, dismissal and process restart. The synthetic test time is near-future; production defaults remain 15:00.
+
+## Statistics ranges and predictive back (1.3.1)
+
+Statistics offers Calendar month, Calendar year, Last 30 days, Last 183 days, All time and Custom. Calendar month remains the default and month/year retain their previous/next controls. Rolling ranges include today: their start is local midnight 29 or 182 dates earlier, and their end is the current instant. All time has no lower bound and displays the earliest active reading/recharge date; tariff history does not define its start. New ranges ignore future readings/recharges. Custom selection changes the active range only when confirmed, and cancelling preserves the previous selection.
+
+The existing later-reading attribution remains: an interval whose later reading is in range contributes its complete recharge-adjusted consumption, including its preceding baseline outside the range. Spending follows recharge dates. Natural-year bars, interval-average trends and bounded daily balance estimates keep their existing meanings. Home and Statistics share the electricity, cold water, hot water display order; storage and other screens retain their existing order. Range/mode choices survive recreation; foreground, date/time-zone and ledger updates refresh rolling ranges.
+
+Long histories compute on a background dispatcher with cached inputs and pre-indexed credits/tariffs. Interval plots have a 2400dp width cap; text intervals are collapsed by default and use a fixed-height lazy list when expanded, preserving access to every detail. Main navigation now belongs entirely to the main destination, so predictive back previews include the same app bar, bottom navigation/landscape rail and padding as the settled page.
+
+```sh
+# Isolated package only, explicit AVD. Handsets additionally require --expected-device-serial.
+python3 tools/navigation_acceptance.py --serial emulator-5554
+```
+
+The navigation harness checks exact executed counts, records synthetic preview/settled app-window screenshots, removes its isolated package and verifies the personal package's version/update timestamp stayed unchanged. Controlled dispatcher progress tests and actual OS edge-touch tests are separate evidence.
+
+The handset path verifies `--expected-device-serial` before installing. Owner-authorized Xiaomi testing may additionally use `--allow-xiaomi-test-launch --root-test-launch --root-instrumentation`; it applies temporary background-launch permission only to the two isolated packages after cold launch and restores it before uninstalling. Root is an opt-in test-environment workaround, not an application requirement. The harness sets only the isolated app's English baseline for fixtures and never changes the device locale. Another tool holding UiAutomation (such as GKD automation) must be paused with owner authorization and restored afterward. See the [1.3.1 acceptance report](../RELEASE-1.3.1-ACCEPTANCE.md) for the actual handset conditions and untested scope.
+
+## Reading feedback and launcher icon (1.3.2)
+
+Saving returns the ID committed with its outbox operation. The UI waits for that ID in the Room-backed visible list, requests one scroll, and consumes the reveal only when the row is visible. Pending reveals and form drafts survive Activity recreation; synchronization never creates reveal requests. The highlight exposes a localized accessibility state and live-region announcement.
+
+The original water-drop/lightning icon uses vector adaptive foreground/background layers, light/dark palette resources, a transparent lightning cutout and a dedicated monochrome layer. Density fallbacks are included. Android's splash screen inherits the launcher icon. Themed coloring requires a supporting launcher with themed icons enabled; launcher caches may delay appearance changes. No launcher-data reset is required or performed.
+
+[Icon previews](artwork/launcher-preview.png) show both palettes, circular/rounded masks, a sample monochrome tint and 48/32/24px sizes. `artwork/launcher-mark.svg` is the native vector source; `tools/generate_launcher_icons.cjs` regenerates resources and previews using Node.js and `sharp`.
+
+```sh
+# Run from repository root; installs and removes only the isolated .acceptancev132 package.
+python3 tools/reading_acceptance.py --serial emulator-5554
+python3 tools/reading_acceptance.py --serial emulator-5556
+```
+
+The handset path uses the same explicitly verified identity and optional OEM test-launch workarounds as navigation acceptance. See the [1.3.2 acceptance record](../RELEASE-1.3.2-ACCEPTANCE.md) for actual execution and outstanding gates.

@@ -28,6 +28,10 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.repeatOnLifecycle
 import com.dowdah.utilitytracker.R
 import com.dowdah.utilitytracker.data.*
 import java.math.BigDecimal
@@ -40,6 +44,9 @@ import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlinx.serialization.json.*
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 
 @Composable
 internal fun RechargeRecords(viewModel: AppViewModel, meters: List<MeterEntity>) {
@@ -143,42 +150,102 @@ private fun SummaryValues(meter: MeterEntity, summary: MeterStatistics) {
 }
 
 private data class TrendPeriod(val label: String, val stats: MeterStatistics)
+private data class StatisticsTime(val now: Instant, val zone: ZoneId)
+private data class PreparedStatistics(val input: StatisticsInput, val range: StatisticsRange, val reports: List<MeterStatisticsReport>)
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun StatisticsScreen(viewModel: AppViewModel, onTariffs: () -> Unit) {
+private fun statisticsTime(clock: Clock?): StatisticsTime {
+    fun sample(): StatisticsTime = (clock ?: Clock.systemDefaultZone()).let { StatisticsTime(it.instant(), it.zone) }
+    var time by remember(clock) { mutableStateOf(sample()) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner, clock) {
+        val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_RESUME) time = sample() }
+        owner.lifecycle.addObserver(observer)
+        onDispose { owner.lifecycle.removeObserver(observer) }
+    }
+    LaunchedEffect(owner, clock) {
+        owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) {
+                time = sample()
+                val midnight = time.now.atZone(time.zone).toLocalDate().plusDays(1).atStartOfDay(time.zone).toInstant()
+                delay(Duration.between(time.now, midnight).toMillis().coerceIn(100, 60_000))
+            }
+        }
+    }
+    return time
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+fun StatisticsScreen(viewModel: AppViewModel, onTariffs: () -> Unit, clock: Clock? = null) {
     val readings by viewModel.readings.collectAsState()
     val tariffs by viewModel.tariffs.collectAsState()
     val meters by viewModel.meters.collectAsState()
     val recharges by viewModel.recharges.collectAsState()
-    val zone = ZoneId.systemDefault()
+    val time = statisticsTime(clock)
+    val zone = time.zone
     val anchor = LocalDate.parse(viewModel.statisticsAnchor)
-    val mode = viewModel.statisticsMode
-    val startDate = if (mode == "year") anchor.withDayOfYear(1) else anchor.withDayOfMonth(1)
-    val nextDate = if (mode == "year") startDate.plusYears(1) else startDate.plusMonths(1)
-    val start = if (mode == "custom") viewModel.statisticsStart else startDate.atStartOfDay(zone).toInstant().toString()
-    val end = if (mode == "custom") viewModel.statisticsEnd else nextDate.atStartOfDay(zone).toInstant().minusNanos(1).toString()
+    val mode = StatisticsMode.fromKey(viewModel.statisticsMode)
+    val customStart = viewModel.statisticsStart
+    val customEnd = viewModel.statisticsEnd
+    val input = remember(meters, readings, tariffs, recharges, mode, anchor, customStart, customEnd, time) {
+        val now = (clock ?: Clock.systemDefaultZone()).instant()
+        val meterIds = meters.map { it.id }.toSet()
+        val shownReadings = readings.filter { it.meterId in meterIds }
+        val shownRecharges = recharges.filter { it.meterId in meterIds }
+        StatisticsInput(mode, anchor,
+            resolveStatisticsRange(mode, anchor, customStart, customEnd, now, zone),
+            zone, meters, shownReadings, tariffs, shownRecharges)
+    }
+    val prepared by produceState<PreparedStatistics?>(null, input) {
+        value = withContext(Dispatchers.Default) {
+            val range = if (mode == StatisticsMode.ALL_TIME) resolveStatisticsRange(mode, anchor, null, null,
+                requireNotNull(input.range.end), zone, input.readings, input.recharges) else input.range
+            PreparedStatistics(input, range, calculateStatistics(input))
+        }
+    }
+    // Keep the same range visible during a clock/data refresh so chart selection and scroll state
+    // survive. A different preset or explicit date range must never show the previous result.
+    val current = prepared?.takeIf {
+        it.input.mode == input.mode && it.input.anchor == input.anchor &&
+            it.input.range.start == input.range.start &&
+            (mode.endsNow || it.input.range.end == input.range.end)
+    }
+    val reports = current?.reports
+    val range = current?.range ?: input.range
+    val dateFormat = DateTimeFormatter.ofLocalizedDate(FormatStyle.MEDIUM).withLocale(Locale.getDefault())
     Column(Modifier.verticalScroll(rememberScrollState()).padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("month" to R.string.month_mode, "year" to R.string.year_mode, "custom" to R.string.custom_mode).forEach { (value, label) ->
-                FilterChip(mode == value, { viewModel.statisticsMode = value; if (value == "custom") viewModel.rangePickerOpen = true }, label = { Text(stringResource(label)) })
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf(StatisticsMode.MONTH to R.string.month_mode, StatisticsMode.YEAR to R.string.year_mode,
+                StatisticsMode.LAST_30_DAYS to R.string.last_30_days, StatisticsMode.LAST_183_DAYS to R.string.last_183_days,
+                StatisticsMode.ALL_TIME to R.string.all_time_mode, StatisticsMode.CUSTOM to R.string.custom_mode).forEach { (value, label) ->
+                FilterChip(mode == value, { viewModel.selectStatisticsMode(value.key) }, label = { Text(stringResource(label)) },
+                    modifier = Modifier.semantics { testTag = "statistics_mode_${value.key}" })
             }
         }
-        if (mode != "custom") {
+        if (mode == StatisticsMode.MONTH || mode == StatisticsMode.YEAR) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                TextButton({ viewModel.statisticsAnchor = (if (mode == "year") anchor.minusYears(1) else anchor.minusMonths(1)).toString() }) { Text(stringResource(R.string.previous_period)) }
-                Text(if (mode == "year") anchor.year.toString() else anchor.format(DateTimeFormatter.ofPattern("yyyy MMM", Locale.getDefault())))
-                TextButton({ viewModel.statisticsAnchor = (if (mode == "year") anchor.plusYears(1) else anchor.plusMonths(1)).toString() }) { Text(stringResource(R.string.next_period)) }
+                TextButton({ viewModel.statisticsAnchor = (if (mode == StatisticsMode.YEAR) anchor.minusYears(1) else anchor.minusMonths(1)).toString() }) { Text(stringResource(R.string.previous_period)) }
+                Text(if (mode == StatisticsMode.YEAR) anchor.year.toString() else anchor.format(DateTimeFormatter.ofPattern("yyyy MMM", Locale.getDefault())))
+                TextButton({ viewModel.statisticsAnchor = (if (mode == StatisticsMode.YEAR) anchor.plusYears(1) else anchor.plusMonths(1)).toString() }) { Text(stringResource(R.string.next_period)) }
             }
-        } else OutlinedButton({ viewModel.rangePickerOpen = true }) { Text(stringResource(R.string.range) + ": " + (start?.localDisplay() ?: stringResource(R.string.all_time)) + " – " + (end?.localDisplay() ?: stringResource(R.string.all_time))) }
+        } else if (mode == StatisticsMode.CUSTOM) {
+            OutlinedButton({ viewModel.rangePickerOpen = true }) {
+                Text(stringResource(R.string.range) + ": " + (range.startUtc?.localDisplay() ?: stringResource(R.string.all_time)) + " – " + (range.endUtc?.localDisplay() ?: stringResource(R.string.all_time)))
+            }
+        } else {
+            val startLabel = range.captionStart?.atZone(zone)?.format(dateFormat) ?: stringResource(
+                if (reports == null) R.string.statistics_calculating else R.string.statistics_no_history)
+            Text(stringResource(R.string.statistics_range_now, startLabel, requireNotNull(range.end).atZone(zone).format(dateFormat)),
+                modifier = Modifier.semantics { testTag = "statistics_range_caption" })
+        }
         Text(stringResource(R.string.interval_attribution), style = MaterialTheme.typography.bodySmall)
         Text(stringResource(R.string.recharge_hint), style = MaterialTheme.typography.bodySmall)
-        meters.forEach { meter ->
-            val rows = readings.filter { it.meterId == meter.id }
-            val rates = tariffs.filter { it.meterId == meter.id }
-            val credits = recharges.filter { it.meterId == meter.id }
-            val summary = statisticsForRange(rows, rates, start, end, credits)
-            ElevatedCard(Modifier.fillMaxWidth()) {
+        if (reports == null) Text(stringResource(R.string.statistics_calculating), Modifier.semantics { testTag = "statistics_calculating" })
+        reports.orEmpty().forEach { report ->
+            val meter = report.meter
+            val summary = report.summary
+            ElevatedCard(Modifier.fillMaxWidth().semantics { testTag = "statistics_meter_${meter.meterType}" }) {
                 Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(meterLabel(meter), style = MaterialTheme.typography.titleMedium)
                     SummaryValues(meter, summary)
@@ -190,27 +257,26 @@ fun StatisticsScreen(viewModel: AppViewModel, onTariffs: () -> Unit) {
                         TextButton(onTariffs) { Text(stringResource(R.string.configure_tariffs)) }
                     }
                     if (summary.costEstimated) Text(stringResource(R.string.estimated_cost_hint))
-                    if (mode == "year") {
-                        val periods = (1..12).map { month ->
-                            val date = LocalDate.of(anchor.year, month, 1)
-                            TrendPeriod(date.format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault())), statisticsForRange(rows, rates, date.atStartOfDay(zone).toInstant().toString(), date.plusMonths(1).atStartOfDay(zone).toInstant().minusNanos(1).toString(), credits))
-                        }
-                        ConsumptionTrend(periods, meter.unit)
+                    if (mode == StatisticsMode.YEAR) {
+                        ConsumptionTrend(report.months.map { TrendPeriod(it.date.format(DateTimeFormatter.ofPattern("MMM", Locale.getDefault())), it.statistics) }, meter.unit)
                     } else {
-                        IntervalAverageTrend(intervalTrendForRange(rows, rates, start, end, credits), meter.unit)
+                        IntervalAverageTrend(report.intervals, meter.unit)
                     }
-                    DailyRemainingTrend(dailyRemainingForRange(meter.id, rows, credits, start, end, zone), meter.unit)
+                    DailyRemainingTrend(report.remaining, meter.unit)
                 }
             }
         }
     }
     if (viewModel.rangePickerOpen) {
-        val picker = rememberDateRangePickerState()
+        fun pickerMillis(value: String?): Long? = value?.let {
+            Instant.parse(it).atZone(zone).toLocalDate().atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
+        }
+        val picker = rememberDateRangePickerState(initialSelectedStartDateMillis = pickerMillis(customStart),
+            initialSelectedEndDateMillis = pickerMillis(customEnd))
         DatePickerDialog(onDismissRequest = { viewModel.rangePickerOpen = false }, confirmButton = {
             TextButton({
-                picker.selectedStartDateMillis?.let { viewModel.statisticsStart = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().atStartOfDay(zone).toInstant().toString() }
-                picker.selectedEndDateMillis?.let { viewModel.statisticsEnd = Instant.ofEpochMilli(it).atZone(ZoneOffset.UTC).toLocalDate().plusDays(1).atStartOfDay(zone).toInstant().minusNanos(1).toString() }
-                viewModel.statisticsMode = "custom"; viewModel.rangePickerOpen = false
+                viewModel.applyStatisticsDates(Instant.ofEpochMilli(requireNotNull(picker.selectedStartDateMillis)).atZone(ZoneOffset.UTC).toLocalDate(),
+                    Instant.ofEpochMilli(requireNotNull(picker.selectedEndDateMillis)).atZone(ZoneOffset.UTC).toLocalDate(), zone)
             }, enabled = picker.selectedStartDateMillis != null && picker.selectedEndDateMillis != null) { Text(stringResource(R.string.save)) }
         }, dismissButton = { TextButton({ viewModel.rangePickerOpen = false }) { Text(stringResource(R.string.cancel)) } }) { DateRangePicker(picker) }
     }
@@ -356,6 +422,7 @@ internal fun IntervalAverageTrend(periods: List<IntervalTrendPoint>, unit: Strin
     }
 
     var selectedIndex by remember(periods) { mutableIntStateOf(-1) }
+    var showValues by remember(periods) { mutableStateOf(false) }
     val axisStart = periods.minOf { it.end }
     val axisEnd = periods.maxOf { it.end }
     val axisMillis = max(1L, java.time.Duration.between(axisStart, axisEnd).toMillis())
@@ -368,7 +435,7 @@ internal fun IntervalAverageTrend(periods: List<IntervalTrendPoint>, unit: Strin
         (java.time.Duration.between(axisStart, instant).toMillis().toFloat() / axisMillis.toFloat()).coerceIn(0f, 1f)
 
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        val plotWidth = maxOf(maxWidth, 56.dp * periods.size)
+        val plotWidth = minOf(2400.dp, maxOf(maxWidth, 56.dp * periods.size))
         Column(Modifier.horizontalScroll(rememberScrollState())) {
             Text("${formatTrendNumber(maxAverage)} $unit/" + stringResource(R.string.day_unit), style = MaterialTheme.typography.labelSmall)
             Canvas(Modifier.width(plotWidth).height(128.dp).semantics { contentDescription = chartDescription; testTag = "interval_average_chart" }.pointerInput(periods, plotWidth) {
@@ -406,16 +473,24 @@ internal fun IntervalAverageTrend(periods: List<IntervalTrendPoint>, unit: Strin
         }
     }
 
-    periods.forEachIndexed { index, period ->
-        val reason = when {
-            period.hasZeroDuration -> stringResource(R.string.interval_zero_duration)
-            period.statistics.hasIncrease -> stringResource(R.string.interval_unknown_increase)
-            else -> null
-        }
-        val value = period.averagePerDay?.let { "${formatTrendNumber(it)} $unit/" + stringResource(R.string.day_unit) } ?: reason ?: "—"
-        Column(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp).semantics { selected = index == selectedIndex; testTag = "interval_item_$index" }.clickable { selectedIndex = index }.padding(vertical = 8.dp)) {
-            Text("${period.start.toString().localDisplay()} – ${period.end.toString().localDisplay()}", style = MaterialTheme.typography.bodySmall)
-            Text(value, style = MaterialTheme.typography.bodyMedium, color = if (index == selectedIndex) selectedColor else MaterialTheme.colorScheme.onSurface)
+    TextButton({ showValues = !showValues }, Modifier.semantics { testTag = "interval_values_toggle" }) {
+        Text(stringResource(if (showValues) R.string.interval_hide_values else R.string.interval_show_values))
+    }
+    if (showValues) {
+        LazyColumn(Modifier.fillMaxWidth().height(240.dp).semantics { testTag = "interval_values" }) {
+            items(periods.size) { index ->
+                val period = periods[index]
+                val reason = when {
+                    period.hasZeroDuration -> stringResource(R.string.interval_zero_duration)
+                    period.statistics.hasIncrease -> stringResource(R.string.interval_unknown_increase)
+                    else -> null
+                }
+                val value = period.averagePerDay?.let { "${formatTrendNumber(it)} $unit/" + stringResource(R.string.day_unit) } ?: reason ?: "—"
+                Column(Modifier.fillMaxWidth().defaultMinSize(minHeight = 48.dp).semantics { selected = index == selectedIndex; testTag = "interval_item_$index" }.clickable { selectedIndex = index }.padding(vertical = 8.dp)) {
+                    Text("${period.start.toString().localDisplay()} – ${period.end.toString().localDisplay()}", style = MaterialTheme.typography.bodySmall)
+                    Text(value, style = MaterialTheme.typography.bodyMedium, color = if (index == selectedIndex) selectedColor else MaterialTheme.colorScheme.onSurface)
+                }
+            }
         }
     }
     periods.getOrNull(selectedIndex)?.let { period ->

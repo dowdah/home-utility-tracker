@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.clickable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -39,6 +40,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
@@ -51,15 +53,20 @@ import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.material3.rememberDateRangePickerState
 import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.integerResource
 import androidx.compose.ui.res.pluralStringResource
@@ -78,6 +85,7 @@ import com.dowdah.utilitytracker.data.MeterEntity
 import com.dowdah.utilitytracker.data.ReadingEntity
 import com.dowdah.utilitytracker.data.TariffEntity
 import com.dowdah.utilitytracker.data.statisticsForRange
+import com.dowdah.utilitytracker.data.statisticsMeterOrder
 import com.dowdah.utilitytracker.data.remainingReadingIncreases
 import java.time.Instant
 import java.time.LocalDateTime
@@ -91,10 +99,14 @@ import java.util.Locale
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
-fun HomeScreen(viewModel: AppViewModel) {
+fun HomeScreen(viewModel: AppViewModel, forecastViewModel: ForecastViewModel = hiltViewModel()) {
+    val forecastState by forecastViewModel.state.collectAsState()
+    val forecasts = forecastState?.let { (snapshot, now) -> snapshot.forecasts(now).associateBy { it.meter.id } }.orEmpty()
     val dashboard by viewModel.dashboard.collectAsState()
     val tariffs by viewModel.tariffs.collectAsState()
     val recharges by viewModel.recharges.collectAsState()
@@ -106,9 +118,10 @@ fun HomeScreen(viewModel: AppViewModel) {
         Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(vertical = 12.dp).verticalScroll(rememberScrollState())) {
             PersistentSyncSummary(dashboard, conflicts.size, viewModel.message)
             FlowRow(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                dashboard.meters.forEach { meter ->
+                statisticsMeterOrder(dashboard.meters).forEach { meter ->
                     Column(Modifier.fillMaxWidth(if (columns > 1) .31f else 1f)) {
                         MeterCard(meter, latest[meter.id], 1)
+                        forecasts[meter.id]?.let { forecast -> ForecastCard(forecast, forecastState?.first?.let { forecast.isLow(it.setting(meter.id)) } == true) }
                         HomeMonthlySummary(meter, dashboard.readings, tariffs, recharges)
                     }
                 }
@@ -138,13 +151,38 @@ fun HomeScreen(viewModel: AppViewModel) {
 fun RecordsScreen(viewModel: AppViewModel) {
     val readings by viewModel.readings.collectAsState()
     val meters by viewModel.meters.collectAsState()
+    val filter = viewModel.recordFilter
+    val visibleReadings = remember(readings, filter) {
+        readings.filter { filter == null || it.meterId == filter }.sortedByDescending { Instant.parse(it.recordedAt) }
+    }
+    val listState = rememberLazyListState()
+    val revealId = viewModel.pendingReadingRevealId
+    var highlightedId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(revealId, readings, filter, viewModel.rechargeTab) {
+        val target = readings.firstOrNull { it.id == revealId } ?: return@LaunchedEffect
+        if (viewModel.rechargeTab) return@LaunchedEffect
+        if (filter != null && filter != target.meterId) {
+            viewModel.recordFilter = target.meterId
+            return@LaunchedEffect
+        }
+        val index = visibleReadings.indexOfFirst { it.id == target.id }
+        if (index < 0) return@LaunchedEffect
+        // Override stable-key anchoring only for this explicit local addition.
+        listState.requestScrollToItem(index)
+        snapshotFlow { listState.layoutInfo.visibleItemsInfo.any { it.key == target.id } }.first { it }
+        highlightedId = target.id
+        viewModel.consumeReadingReveal(target.id)
+    }
+    LaunchedEffect(highlightedId) {
+        if (highlightedId != null) { delay(2_000); highlightedId = null }
+    }
     var deleteTarget by remember { mutableStateOf<ReadingEntity?>(null) }
     var refreshing by remember { mutableStateOf(false) }
     PullToRefreshBox(isRefreshing = refreshing, onRefresh = { refreshing = true; viewModel.sync { refreshing = false } }) {
         Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.padding(vertical = 12.dp)) {
             FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = viewModel.recordFilter == null, onClick = { viewModel.recordFilter = null }, label = { Text(stringResource(R.string.all)) })
-                meters.forEach { meter -> FilterChip(selected = viewModel.recordFilter == meter.id, onClick = { viewModel.recordFilter = meter.id }, label = { Text(meterLabel(meter)) }) }
+                FilterChip(modifier = Modifier.semantics { testTag = "reading_filter_all" }, selected = viewModel.recordFilter == null, onClick = { viewModel.recordFilter = null }, label = { Text(stringResource(R.string.all)) })
+                meters.forEach { meter -> FilterChip(modifier = Modifier.semantics { testTag = "reading_filter_${meter.id}" }, selected = viewModel.recordFilter == meter.id, onClick = { viewModel.recordFilter = meter.id }, label = { Text(meterLabel(meter)) }) }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(!viewModel.rechargeTab, { viewModel.rechargeTab = false }, label = { Text(stringResource(R.string.readings_tab)) })
@@ -152,11 +190,11 @@ fun RecordsScreen(viewModel: AppViewModel) {
             }
             if (viewModel.rechargeTab) RechargeRecords(viewModel, meters)
             else {
-                Button(onClick = { viewModel.openNewReading() }) { Icon(Icons.Default.Add, stringResource(R.string.add_reading)); Text(stringResource(R.string.add_reading)) }
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (readings.isEmpty()) item { Text(stringResource(R.string.no_records)) }
-                    items(readings.filter { viewModel.recordFilter == null || it.meterId == viewModel.recordFilter }.sortedByDescending { Instant.parse(it.recordedAt) }, key = { it.id }) { reading ->
-                        ReadingCard(reading, meters.firstOrNull { it.id == reading.meterId }, onEdit = { viewModel.openReading(reading) }, onDelete = { deleteTarget = reading })
+                Button(onClick = { viewModel.openNewReading() }, modifier = Modifier.semantics { testTag = "reading_add" }) { Icon(Icons.Default.Add, stringResource(R.string.add_reading)); Text(stringResource(R.string.add_reading)) }
+                LazyColumn(state = listState, modifier = Modifier.semantics { testTag = "reading_list" }, verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    if (visibleReadings.isEmpty()) item { Text(stringResource(R.string.no_records)) }
+                    items(visibleReadings, key = { it.id }) { reading ->
+                        ReadingCard(reading, meters.firstOrNull { it.id == reading.meterId }, highlighted = reading.id == highlightedId, onEdit = { viewModel.openReading(reading) }, onDelete = { deleteTarget = reading })
                     }
                 }
             }
@@ -167,13 +205,18 @@ fun RecordsScreen(viewModel: AppViewModel) {
     deleteTarget?.let { reading -> ConfirmationDialog(stringResource(R.string.delete_reading), stringResource(R.string.delete_reading_message), { deleteTarget = null }) { viewModel.deleteReading(reading); deleteTarget = null } }
 }
 
-@Composable private fun ReadingCard(reading: ReadingEntity, meter: MeterEntity?, onEdit: () -> Unit, onDelete: () -> Unit) {
+@Composable private fun ReadingCard(reading: ReadingEntity, meter: MeterEntity?, highlighted: Boolean, onEdit: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
-    ElevatedCard(Modifier.fillMaxWidth()) { ListItem(
+    val added = stringResource(R.string.reading_just_added)
+    ElevatedCard(Modifier.fillMaxWidth().semantics {
+        testTag = "reading_${reading.id}"
+        if (highlighted) { stateDescription = added; liveRegion = LiveRegionMode.Polite }
+    }) { ListItem(
+        colors = ListItemDefaults.colors(containerColor = if (highlighted) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLow),
         headlineContent = { Text("${reading.valueDecimal} ${meter?.unit.orEmpty()}") },
         supportingContent = { Column { Text(reading.recordedAt.localDisplay()); reading.note?.let { Text(it) } } },
         overlineContent = { Text(meter?.let { meterLabel(it) } ?: reading.meterId) },
-        trailingContent = { IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, stringResource(R.string.record_actions)) }; DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) { DropdownMenuItem(text = { Text(stringResource(R.string.edit)) }, onClick = { menu = false; onEdit() }, leadingIcon = { Icon(Icons.Default.Edit, null) }); DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, onClick = { menu = false; onDelete() }, leadingIcon = { Icon(Icons.Default.Delete, null) }) } },
+        trailingContent = { IconButton(onClick = { menu = true }, modifier = Modifier.semantics { testTag = "reading_actions_${reading.id}" }) { Icon(Icons.Default.MoreVert, stringResource(R.string.record_actions)) }; DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) { DropdownMenuItem(text = { Text(stringResource(R.string.edit)) }, onClick = { menu = false; onEdit() }, leadingIcon = { Icon(Icons.Default.Edit, null) }); DropdownMenuItem(text = { Text(stringResource(R.string.delete)) }, onClick = { menu = false; onDelete() }, leadingIcon = { Icon(Icons.Default.Delete, null) }) } },
     ) }
 }
 
@@ -181,16 +224,16 @@ fun RecordsScreen(viewModel: AppViewModel) {
 @Composable private fun ReadingEditor(viewModel: AppViewModel, meters: List<MeterEntity>, existing: List<ReadingEntity>) {
     val recharges by viewModel.recharges.collectAsState()
     var confirmIncrease by rememberSaveable { mutableStateOf(false) }
-    AlertDialog(onDismissRequest = viewModel::closeReadingEditor, title = { Text(if (viewModel.readingEditorId == null) stringResource(R.string.add_reading) else stringResource(R.string.edit_reading)) }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    AlertDialog(onDismissRequest = { if (!viewModel.formBusy) viewModel.closeReadingEditor() }, title = { Text(if (viewModel.readingEditorId == null) stringResource(R.string.add_reading) else stringResource(R.string.edit_reading)) }, text = { Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         MeterChooser(meters, viewModel.readingMeterId) { viewModel.readingMeterId = it }
         if (meters.none { it.id == viewModel.readingMeterId }) Text(stringResource(R.string.reading_meter_required), color = MaterialTheme.colorScheme.error)
-        OutlinedTextField(viewModel.readingValue, { viewModel.readingValue = it }, label = { Text(stringResource(R.string.reading_value)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth())
+        OutlinedTextField(viewModel.readingValue, { viewModel.readingValue = it }, label = { Text(stringResource(R.string.reading_value)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal), modifier = Modifier.fillMaxWidth().semantics { testTag = "reading_value" })
         DateTimeField(viewModel.readingRecordedAt) { viewModel.readingRecordedAt = it }
         viewModel.message?.let { Text(localizedMessage(it) ?: it, color = MaterialTheme.colorScheme.error) }
-        OutlinedTextField(viewModel.readingNote, { viewModel.readingNote = it }, label = { Text(stringResource(R.string.note)) }, modifier = Modifier.fillMaxWidth())
-    } }, confirmButton = { Button(enabled = !viewModel.formBusy && meters.any { it.id == viewModel.readingMeterId } && (viewModel.readingValue.toBigDecimalOrNull()?.signum()?.let { it >= 0 } == true), onClick = {
+        OutlinedTextField(viewModel.readingNote, { viewModel.readingNote = it }, label = { Text(stringResource(R.string.note)) }, modifier = Modifier.fillMaxWidth().semantics { testTag = "reading_note" })
+    } }, confirmButton = { Button(modifier = Modifier.semantics { testTag = "reading_save" }, enabled = !viewModel.formBusy && meters.any { it.id == viewModel.readingMeterId } && (viewModel.readingValue.toBigDecimalOrNull()?.signum()?.let { it >= 0 } == true), onClick = {
         if (remainingReadingIncreases(existing, viewModel.readingEditorId, viewModel.readingMeterId, viewModel.readingValue, viewModel.readingRecordedAt, recharges)) confirmIncrease = true else viewModel.persistReadingDraft()
-    }) { Text(stringResource(R.string.save)) } }, dismissButton = { TextButton(onClick = viewModel::closeReadingEditor) { Text(stringResource(R.string.cancel)) } })
+    }) { Text(stringResource(R.string.save)) } }, dismissButton = { TextButton(enabled = !viewModel.formBusy, onClick = viewModel::closeReadingEditor) { Text(stringResource(R.string.cancel)) } })
     if (confirmIncrease) ConfirmationDialog(stringResource(R.string.remaining_increased), stringResource(R.string.increase_confirmation), { confirmIncrease = false }) { confirmIncrease = false; viewModel.persistReadingDraft() }
 }
 
@@ -199,8 +242,8 @@ fun RecordsScreen(viewModel: AppViewModel) {
     var expanded by remember { mutableStateOf(false) }
     val label = meters.firstOrNull { it.id == selected }?.let { meterLabel(it) } ?: stringResource(R.string.select_meter)
     ExposedDropdownMenuBox(expanded, { expanded = !expanded }) {
-        OutlinedTextField(label, {}, readOnly = true, label = { Text(stringResource(R.string.meter)) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth())
-        ExposedDropdownMenu(expanded, { expanded = false }) { meters.forEach { meter -> DropdownMenuItem(text = { Text(meterLabel(meter)) }, onClick = { onSelect(meter.id); expanded = false }) } }
+        OutlinedTextField(label, {}, readOnly = true, label = { Text(stringResource(R.string.meter)) }, trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded) }, modifier = Modifier.menuAnchor().fillMaxWidth().semantics { testTag = "meter_chooser" })
+        ExposedDropdownMenu(expanded, { expanded = false }) { meters.forEach { meter -> DropdownMenuItem(modifier = Modifier.semantics { testTag = "meter_option_${meter.id}" }, text = { Text(meterLabel(meter)) }, onClick = { onSelect(meter.id); expanded = false }) } }
     }
 }
 
@@ -220,10 +263,10 @@ fun RecordsScreen(viewModel: AppViewModel) {
 }
 
 @Composable
-fun SettingsScreen(viewModel: AppViewModel, onEndpoints: () -> Unit, onTariffs: () -> Unit, onConflicts: () -> Unit, onExport: () -> Unit) {
+fun SettingsScreen(viewModel: AppViewModel, onEndpoints: () -> Unit, onTariffs: () -> Unit, onConflicts: () -> Unit, onExport: () -> Unit, onReminders: () -> Unit) {
     val conflicts by viewModel.conflicts.collectAsState()
     LazyColumn(Modifier.padding(vertical = 12.dp)) {
-        item { ElevatedCard(Modifier.fillMaxWidth()) { Column { SettingsRow(stringResource(R.string.backend_urls), onEndpoints); HorizontalDivider(); SettingsRow(stringResource(R.string.tariff_history), onTariffs); HorizontalDivider(); SettingsRow("${stringResource(R.string.conflicts)} (${conflicts.size})", onConflicts); HorizontalDivider(); SettingsRow(stringResource(R.string.export_csv), onExport) } } }
+        item { ElevatedCard(Modifier.fillMaxWidth()) { Column { SettingsRow(stringResource(R.string.reminder_settings), onReminders); HorizontalDivider(); SettingsRow(stringResource(R.string.backend_urls), onEndpoints); HorizontalDivider(); SettingsRow(stringResource(R.string.tariff_history), onTariffs); HorizontalDivider(); SettingsRow("${stringResource(R.string.conflicts)} (${conflicts.size})", onConflicts); HorizontalDivider(); SettingsRow(stringResource(R.string.export_csv), onExport) } } }
     }
 }
 @Composable private fun SettingsRow(label: String, action: () -> Unit) = ListItem(headlineContent = { Text(label) }, modifier = Modifier.fillMaxWidth().clickable(onClick = action), trailingContent = { Text("›") })
@@ -259,7 +302,7 @@ fun EndpointScreen(onBack: () -> Unit, viewModel: EndpointViewModel = hiltViewMo
 @Composable private fun TariffEditor(viewModel: AppViewModel, meters: List<MeterEntity>) = AlertDialog(onDismissRequest = viewModel::closeTariffEditor, title = { Text(if (viewModel.tariffEditorId == null) stringResource(R.string.add_tariff) else stringResource(R.string.edit)) }, text = { Column { MeterChooser(meters, viewModel.tariffMeterId) { viewModel.tariffMeterId = it }; OutlinedTextField(viewModel.tariffPrice, { viewModel.tariffPrice = it }, label = { Text(stringResource(R.string.price)) }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal)); DateTimeField(viewModel.tariffEffectiveFrom) { viewModel.tariffEffectiveFrom = it } } }, confirmButton = { Button(viewModel::persistTariffDraft, enabled = !viewModel.formBusy && meters.any { it.id == viewModel.tariffMeterId } && viewModel.tariffPrice.toBigDecimalOrNull()?.signum()?.let { it >= 0 } == true) { Text(stringResource(R.string.save)) } }, dismissButton = { TextButton(viewModel::closeTariffEditor) { Text(stringResource(R.string.cancel)) } })
 
 @Composable fun ConflictScreen(viewModel: AppViewModel, onBack: () -> Unit) { val conflicts by viewModel.conflicts.collectAsState(); Scaffold(topBar = { SimpleBackBar(stringResource(R.string.conflicts), onBack) }) { padding -> LazyColumn(Modifier.padding(padding).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) { items(conflicts, key = { it.operationId }) { conflict -> ConflictCard(conflict, { viewModel.keepServer(conflict) }, { viewModel.overrideServer(conflict) }) } } } }
-@Composable private fun ConflictCard(conflict: ConflictEntity, keep: () -> Unit, override: () -> Unit) {
+@Composable internal fun ConflictCard(conflict: ConflictEntity, keep: () -> Unit, override: () -> Unit) {
     val json = remember(conflict) { Json { ignoreUnknownKeys = true; explicitNulls = false } }
     val local = remember(conflict.localPayloadJson) { runCatching { json.parseToJsonElement(conflict.localPayloadJson).jsonObject }.getOrNull() }
     val server = remember(conflict.serverEntityJson) { conflict.serverEntityJson?.let { runCatching { json.parseToJsonElement(it).jsonObject }.getOrNull() } }
@@ -270,7 +313,7 @@ fun EndpointScreen(onBack: () -> Unit, viewModel: EndpointViewModel = hiltViewMo
             Text(when (conflict.entityType) { "reading" -> stringResource(R.string.reading_value); "recharge" -> stringResource(R.string.recharges_tab); else -> stringResource(R.string.price) }, style = MaterialTheme.typography.titleMedium)
             Text(stringResource(R.string.server_revision, server?.get("server_revision")?.jsonPrimitive?.content ?: stringResource(R.string.unknown)), style = MaterialTheme.typography.bodySmall)
             Text(stringResource(R.string.local_draft, local.value() ?: if (conflict.localPayloadJson == "{}") stringResource(R.string.delete) else stringResource(R.string.unavailable_value)))
-            Text(stringResource(R.string.server_value, server.value() ?: if (server?.get("deleted")?.jsonPrimitive?.content == "true") stringResource(R.string.deleted) else stringResource(R.string.unavailable_value)))
+            Text(stringResource(R.string.server_value, if (server?.get("deleted")?.jsonPrimitive?.content == "true") stringResource(R.string.deleted) else server.value() ?: stringResource(R.string.unavailable_value)))
             if (conflict.groupId != null) Text(stringResource(R.string.linked_conflict))
             Text(stringResource(R.string.conflict_description), style = MaterialTheme.typography.bodySmall)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { OutlinedButton(keep) { Text(stringResource(R.string.keep_server)) }; Button(override) { Text(stringResource(R.string.override_server)) } }
