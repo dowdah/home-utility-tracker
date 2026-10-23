@@ -32,6 +32,8 @@ CLASSES = {
     "ui.ForecastCardTest": 1,
     "data.ForecastRepositoryTest": 1,
     "data.ReminderRuntimeTest": 1,
+    "data.ReminderMorningUpdateTest": 1,
+    "ui.HomeForecastTest": 1,
     "ui.ReminderSettingsTest": 1,
     "ui.PredictiveBackTest": 4,
     "ui.StatisticsLongHistoryTest": 1,
@@ -78,6 +80,9 @@ def main():
             (directory / (name + ".txt")).write_text(output)
             if f"OK ({count} test{'s' if count != 1 else ''})" not in output or "INSTRUMENTATION_STATUS_CODE: -3" in output:
                 raise RuntimeError(f"Expected {count} executed tests in {name}:\n{output[-7000:]}")
+            if name == "ui.HomeForecastTest":
+                (directory / "home-forecast.trace").write_bytes(subprocess.check_output(
+                    adb + ["exec-out", "run-as", PACKAGE, "cat", "files/home-forecast.trace"]))
             report["classes"].append({"name": name, "tests": count, "passed": True})
             print(f"Passed {name}: {count}", flush=True)
         report["completed"] = True

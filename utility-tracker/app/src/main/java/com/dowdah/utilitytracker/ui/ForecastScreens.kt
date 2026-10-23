@@ -10,6 +10,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import com.dowdah.utilitytracker.R
 import com.dowdah.utilitytracker.data.BalanceForecast
@@ -21,7 +22,7 @@ internal fun BigDecimal.forecastDisplay() = setScale(2, RoundingMode.HALF_UP).st
 
 @Composable
 internal fun ForecastCard(forecast: BalanceForecast, low: Boolean = false) {
-    ElevatedCard(Modifier.fillMaxWidth().padding(top = 8.dp)) {
+    ElevatedCard(Modifier.fillMaxWidth().padding(top = 8.dp).testTag("forecast_${forecast.meter.id}")) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(stringResource(R.string.forecast_title), style = MaterialTheme.typography.titleSmall)
             if (low) Text(stringResource(R.string.forecast_low), color = MaterialTheme.colorScheme.error)

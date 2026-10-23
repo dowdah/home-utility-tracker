@@ -106,7 +106,6 @@ import kotlinx.coroutines.flow.first
 @Composable
 fun HomeScreen(viewModel: AppViewModel, forecastViewModel: ForecastViewModel = hiltViewModel()) {
     val forecastState by forecastViewModel.state.collectAsState()
-    val forecasts = forecastState?.let { (snapshot, now) -> snapshot.forecasts(now).associateBy { it.meter.id } }.orEmpty()
     val dashboard by viewModel.dashboard.collectAsState()
     val tariffs by viewModel.tariffs.collectAsState()
     val recharges by viewModel.recharges.collectAsState()
@@ -121,7 +120,7 @@ fun HomeScreen(viewModel: AppViewModel, forecastViewModel: ForecastViewModel = h
                 statisticsMeterOrder(dashboard.meters).forEach { meter ->
                     Column(Modifier.fillMaxWidth(if (columns > 1) .31f else 1f)) {
                         MeterCard(meter, latest[meter.id], 1)
-                        forecasts[meter.id]?.let { forecast -> ForecastCard(forecast, forecastState?.first?.let { forecast.isLow(it.setting(meter.id)) } == true) }
+                        forecastState?.meters?.get(meter.id)?.let { ForecastCard(it.forecast, it.low) }
                         HomeMonthlySummary(meter, dashboard.readings, tariffs, recharges)
                     }
                 }

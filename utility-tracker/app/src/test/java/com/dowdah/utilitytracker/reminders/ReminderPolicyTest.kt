@@ -27,6 +27,20 @@ class ReminderPolicyTest {
         assertEquals(ReminderAction.CANCEL,decide(time,enabled=false))
         assertEquals(ReminderAction.ALERT,decide(time))
     }
+    @Test fun morningMaintenanceDoesNotConsumeOrSuppressTheNextDailyAlert() {
+        val yesterday = setOf("2026-10-03")
+        assertEquals(ReminderAction.UPDATE,decide("2026-10-04T09:00:00+08:00",yesterday,true))
+        assertEquals(ReminderAction.NONE,decide("2026-10-04T09:00:00+08:00",yesterday,false))
+        assertEquals(ReminderAction.ALERT,decide("2026-10-04T15:00:00+08:00",yesterday,true))
+        assertEquals(ReminderAction.UPDATE,decide("2026-10-04T09:00:00+08:00",setOf("2026-10-04"),true))
+        assertEquals(ReminderAction.NONE,decide("2026-10-04T09:00:00+08:00",setOf("2026-10-04"),false))
+    }
+    @Test fun morningRecoveryDisableAndPermissionRevocationStillCancel() {
+        val time = "2026-10-04T09:00:00+08:00"
+        assertEquals(ReminderAction.CANCEL,decide(time,active=true,low=false))
+        assertEquals(ReminderAction.CANCEL,decide(time,active=true,enabled=false))
+        assertEquals(ReminderAction.CANCEL,decide(time,active=true,permitted=false))
+    }
     @Test fun timezoneChangesUseLocalCalendarDaysWithoutRepeatingPreviouslyNotifiedDates() {
         val now=ZonedDateTime.parse("2026-10-04T16:00:00+08:00")
         val previous=now.withZoneSameInstant(ZoneId.of("Pacific/Honolulu"))

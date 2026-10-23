@@ -31,8 +31,8 @@ fun balanceForecast(
     conflicted: Boolean,
     now: Instant,
 ): BalanceForecast {
-    val rows = readings.filter { !it.deleted && it.meterId == meter.id }.sortedBy { Instant.parse(it.recordedAt) }
-    val latest = rows.lastOrNull()
+    val rows = indexedReadings(readings.filter { it.meterId == meter.id })
+    val latest = rows.lastOrNull()?.entity
     val base = BalanceForecast(meter, latest)
     if (conflicted) return base.copy(issue = ForecastIssue.CONFLICT)
     if (latest == null) return base.copy(issue = ForecastIssue.NO_READING)
@@ -43,24 +43,23 @@ fun balanceForecast(
     val result = base.copy(oldReading = age > Duration.ofDays(if (electric) 7 else 30))
     if (age > Duration.ofDays(if (electric) 30 else 90)) return result.copy(issue = ForecastIssue.STALE_READING)
     val cutoff = at.minus(Duration.ofDays(if (electric) 30 else 180))
-    val groups = rows.groupBy { Instant.parse(it.recordedAt) }
+    val groups = rows.groupBy { it.at }
     // Keep the full boundary interval, including the last reading before the window.
     val unique = groups.values.map { it.last() }
-    val relevantStart = unique.lastOrNull { Instant.parse(it.recordedAt) < cutoff }?.recordedAt?.let(Instant::parse) ?: Instant.MIN
-    if (groups.any { (time, sameTime) -> time >= relevantStart && sameTime.map { it.valueDecimal.toBigDecimal().stripTrailingZeros() }.distinct().size > 1 }) {
+    val relevantStart = unique.lastOrNull { it.at < cutoff }?.at ?: Instant.MIN
+    if (groups.any { (time, sameTime) -> time >= relevantStart && sameTime.map { it.value.stripTrailingZeros() }.distinct().size > 1 }) {
         return result.copy(issue = ForecastIssue.AMBIGUOUS_READING)
     }
-    val credits = recharges.filter { !it.deleted && it.meterId == meter.id && Instant.parse(it.creditedAt) <= now }
-    fun creditBetween(start: Instant, end: Instant) = credits.filter {
-        val time = Instant.parse(it.creditedAt); time > start && time <= end
-    }.fold(BigDecimal.ZERO) { sum, item -> sum + item.quantityDecimal.toBigDecimal() }
+    // Parse/sort once; prefix sums and binary boundaries preserve (start, end].
+    // Every queried end is <= now, so future credits stay outside the projection.
+    val credits = indexedRecharges(recharges.filter { it.meterId == meter.id })
     var seconds = BigDecimal.ZERO
     var consumed = BigDecimal.ZERO
     for ((previous, current) in unique.zipWithNext().asReversed()) {
-        val start = Instant.parse(previous.recordedAt)
-        val end = Instant.parse(current.recordedAt)
+        val start = previous.at
+        val end = current.at
         if (end <= cutoff) break
-        val delta = previous.valueDecimal.toBigDecimal() + creditBetween(start, end) - current.valueDecimal.toBigDecimal()
+        val delta = previous.value + credits.quantityAfter(start, end) - current.value
         if (delta.signum() < 0) {
             if (seconds.signum() == 0) return result.copy(issue = ForecastIssue.INVALID_INTERVAL)
             break
@@ -71,7 +70,7 @@ fun balanceForecast(
     if (seconds < DAY_SECONDS * BigDecimal(if (electric) 1 else 7)) return result.copy(issue = ForecastIssue.INSUFFICIENT_HISTORY)
     val daily = consumed.multiply(DAY_SECONDS).divide(seconds, 12, RoundingMode.HALF_EVEN)
     val sinceReading = forecastSeconds(age)
-    val remaining = (latest.valueDecimal.toBigDecimal() + creditBetween(at, now) -
+    val remaining = (latest.valueDecimal.toBigDecimal() + credits.quantityAfter(at, now) -
         consumed.multiply(sinceReading).divide(seconds, 12, RoundingMode.HALF_EVEN)).max(BigDecimal.ZERO)
     return result.copy(
         coverageDays = seconds.divide(DAY_SECONDS, 12, RoundingMode.HALF_EVEN),

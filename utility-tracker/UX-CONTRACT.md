@@ -50,9 +50,9 @@ Default date/time controls remain Material pickers. Form quantities and monetary
 
 | Behavior | Contract | Verification |
 | --- | --- | --- |
-| Forecast | Separate from actual readings and historical statistics. Weighted complete recharge-aware intervals, electricity/water windows and age limits, independent per-meter uncertainty/conflict handling. | BalanceForecastTest, ForecastRepositoryTest, ForecastCardTest |
+| Forecast | Separate from actual readings and historical statistics. Weighted complete recharge-aware intervals, electricity/water windows and age limits, independent per-meter uncertainty/conflict handling. Background cached Home results, indexed recharge intervals, minute/data refresh. | BalanceForecastTest, ForecastIndexTest, ForecastStateTest, ForecastRepositoryTest, ForecastCardTest, HomeForecastTest |
 | Reminder preferences | Device-local Room schema 3; default 15:00, seven days, optional quantity threshold. Explicit notification permission; rejected permission leaves forecasts/settings usable. | Migration tests, ReminderSettingsTest |
-| Notification | One combined alert per local date, silent existing-notification updates, no repost after dismissal, cancel on recovery or invalid forecasts. No network constraint; Android scheduling may be delayed. | ReminderPolicyTest, ReminderRuntimeTest, real offline reminder harness |
+| Notification | One combined alert per local date, silent existing-notification updates including before the selected time without consuming the daily alert, no repost after dismissal, remove recovered/invalid meters and cancel when none remain. No network constraint; Android scheduling may be delayed. | ReminderPolicyTest, ReminderRuntimeTest, ReminderMorningUpdateTest, real offline reminder harness |
 | Restore | Preserve threshold/time in the backed-up ledger; clear notification opt-in and daily state alongside credentials/installation identity. | BackupRecoveryTest, actual local-transport backup acceptance |
 | Conflict display | A server tombstone is shown as deleted even when its old business value is present. Missing server entity is unavailable; local tombstone is a deletion draft. | ConflictCardTest in Chinese and English |
 

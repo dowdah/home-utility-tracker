@@ -20,9 +20,11 @@ mockwebserver = "4.12.0"
 hiltNavigation = "1.3.0"
 retrofit = "3.0.0"
 serialization = "1.9.0"
+coroutines = "1.9.0"
 retrofitSerialization = "1.0.0"
 
 [libraries]
+kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "coroutines" }
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }
 androidx-junit = { group = "androidx.test.ext", name = "junit", version.ref = "junitVersion" }
