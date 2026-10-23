@@ -29,6 +29,7 @@ def main():
     parser.add_argument("--serial", required=True)
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--previous-apk", type=Path, help="same isolated namespace, signed baseline APK for a real version upgrade")
+    parser.add_argument("--previous-test-apk", type=Path, help="baseline instrumentation APK used only to seed the old installation")
     args = parser.parse_args()
     if not re.fullmatch(r"emulator-\d+", args.serial):
         parser.error("Only explicit emulator serials may be used")
@@ -76,11 +77,15 @@ def main():
             shell("pm", "clear", PACKAGE)
             if args.previous_apk:
                 run(adb + ["install", "-r", "-d", str(args.previous_apk)])
+            if args.previous_test_apk:
+                run(adb + ["install", "-r", "-t", str(args.previous_test_apk)])
             output = step("seed")
             identity = re.search(r"old_identity=([^\s]+)", output).group(1)
             if args.previous_apk:
                 assert f"seed_version={report['upgrade']['from']}" in output, "Fixture was not seeded by the old APK"
             run(adb + ["install", "-r", str(app)])
+            if args.previous_test_apk:
+                run(adb + ["install", "-r", "-t", str(test)])
             step("upgrade", identity)
             shell("settings", "put", "secure", "backup_local_transport_parameters", flags)
             output = shell("bmgr", "backupnow", "--non-incremental", "@pm@", PACKAGE)

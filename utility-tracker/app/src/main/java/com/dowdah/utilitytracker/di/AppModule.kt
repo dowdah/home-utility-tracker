@@ -18,6 +18,6 @@ object AppModule {
         com.dowdah.utilitytracker.data.LedgerRecovery.completeRestore(context)
         return Room.databaseBuilder(
         context, UtilityDatabase::class.java, "utility-tracker.db",
-    ).addMigrations(com.dowdah.utilitytracker.data.MIGRATION_1_2).build()
+    ).addMigrations(com.dowdah.utilitytracker.data.MIGRATION_1_2, com.dowdah.utilitytracker.data.MIGRATION_2_3).build()
     }
 }

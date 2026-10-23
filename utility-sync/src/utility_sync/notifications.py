@@ -155,6 +155,7 @@ def _empty_state() -> dict[str, Any]:
         configured=False,
         incidents={},
         failure_count=0,
+        failed_events=[],
         next_attempt_at=None,
         last_attempt_at=None,
         last_success_at=None,
@@ -186,6 +187,14 @@ def _read_state(path: Path) -> dict[str, Any]:
         if not isinstance(merged["enabled"], bool) or not isinstance(merged["configured"], bool):
             raise ValueError
         if merged["last_error_code"] not in safe_errors:
+            raise ValueError
+        # Older state files did not bind delivery errors to their incidents.
+        if "failed_events" not in value and str(merged["last_error_code"]).startswith("smtp_"):
+            merged["failed_events"] = list(merged["incidents"])
+        if not isinstance(merged["failed_events"], list) or any(
+            not isinstance(code, str) or not re.fullmatch(r"[a-z][a-z0-9_]{0,79}", code)
+            for code in merged["failed_events"]
+        ):
             raise ValueError
         if not isinstance(merged["failure_count"], int) or not 0 <= merged["failure_count"] <= 5:
             raise ValueError
@@ -273,6 +282,12 @@ def process_notifications(
             )
             _publish(path, state)
             return public_status(directory)
+        if state["last_error_code"] in {
+            "configuration_permissions",
+            "configuration_invalid",
+            "configuration_unreadable",
+        }:
+            state["last_error_code"] = None
         state.update(enabled=config.enabled, configured=config.enabled)
         if not config.enabled:
             _publish(path, state)
@@ -297,6 +312,10 @@ def process_notifications(
                 events[code] = "fault"
             elif now - datetime.fromisoformat(notified) >= timedelta(hours=6):
                 events[code] = "reminder"
+        state["failed_events"] = [code for code in state["failed_events"] if code in incidents]
+        if not state["failed_events"] and str(state["last_error_code"]).startswith("smtp_"):
+            # Cancellation is not successful SMTP delivery. Keep the attempt/success timestamps.
+            state.update(last_error_code=None, failure_count=0, next_attempt_at=None)
         next_attempt = state["next_attempt_at"]
         if events and (next_attempt is None or now >= datetime.fromisoformat(next_attempt)):
             state["last_attempt_at"] = now.isoformat()
@@ -306,6 +325,7 @@ def process_notifications(
                 failures = min(state["failure_count"] + 1, 5)
                 state.update(
                     failure_count=failures,
+                    failed_events=sorted(events),
                     last_error_code=_error_code(error),
                     next_attempt_at=(
                         now + timedelta(minutes=(5, 10, 20, 40, 60)[failures - 1])
@@ -314,6 +334,7 @@ def process_notifications(
             else:
                 state.update(
                     failure_count=0,
+                    failed_events=[],
                     next_attempt_at=None,
                     last_error_code=None,
                     last_success_at=now.isoformat(),
@@ -323,7 +344,7 @@ def process_notifications(
                         del incidents[code]
                     else:
                         incidents[code]["notified_at"] = now.isoformat()
-        elif not events:
+        elif not events and not state["failed_events"]:
             state.update(failure_count=0, next_attempt_at=None)
         _publish(path, state)
         return public_status(directory)

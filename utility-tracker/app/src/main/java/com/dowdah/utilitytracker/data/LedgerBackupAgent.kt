@@ -47,6 +47,8 @@ object LedgerRecovery {
         check(context.getSharedPreferences("utility_tracker_secrets", Context.MODE_PRIVATE).edit().clear().commit())
         val identity = File(context.noBackupFilesDir, "installation-id")
         if (identity.exists()) check(identity.delete())
+        android.util.AtomicFile(File(context.noBackupFilesDir, "balance-reminder-device.json")).delete()
+        context.getSystemService(android.app.NotificationManager::class.java).cancel(com.dowdah.utilitytracker.reminders.ReminderController.NOTIFICATION_ID)
         val path = context.getDatabasePath(DATABASE_NAME)
         if (path.exists()) SQLiteDatabase.openDatabase(path.path, null, SQLiteDatabase.OPEN_READWRITE).use { db ->
             db.beginTransaction()

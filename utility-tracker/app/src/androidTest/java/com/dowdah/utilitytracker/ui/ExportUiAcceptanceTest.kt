@@ -73,7 +73,7 @@ class ExportUiAcceptanceTest {
             assertNotNull(device.wait(Until.findObject(By.clazz("android.widget.EditText")), 10000))
             device.pressBack()
             if (device.currentPackageName?.contains("documentsui") == true) device.pressBack()
-            compose.waitUntil(10000) { compose.onAllNodesWithText(label(R.string.export_cancelled)).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(10000) { runCatching { compose.onAllNodesWithText(label(R.string.export_cancelled)).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false) }
             compose.onNodeWithTag("export_save").performScrollTo().assertIsEnabled().performClick()
             val filename = device.wait(Until.findObject(By.clazz("android.widget.EditText")), 10000)!!
             val name = "acceptance-export-${UUID.randomUUID()}.csv"
@@ -82,7 +82,7 @@ class ExportUiAcceptanceTest {
             compose.activityRule.scenario.onActivity { it.recreate() }
             val save = device.wait(Until.findObject(By.text(java.util.regex.Pattern.compile("(?i)save|保存"))), 10000)
             assertNotNull(save); save!!.click()
-            compose.waitUntil(15000) { compose.onAllNodesWithText(label(R.string.export_complete)).fetchSemanticsNodes().isNotEmpty() }
+            compose.waitUntil(15000) { runCatching { compose.onAllNodesWithText(label(R.string.export_complete)).fetchSemanticsNodes().isNotEmpty() }.getOrDefault(false) }
             val csv = instrumentation.uiAutomation.executeShellCommand("cat /sdcard/Download/$name").use {
                 android.os.ParcelFileDescriptor.AutoCloseInputStream(it).bufferedReader().readText()
             }

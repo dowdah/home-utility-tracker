@@ -139,13 +139,14 @@ class BackendRepository @Inject constructor(
         require((note?.length ?: 0) <= 1000) { "Note must be at most 1000 characters" }
     }
 
-    suspend fun saveReading(id: String? = null, meterId: String, value: String, recordedAt: String, note: String?) = database.withTransaction {
+    suspend fun saveReading(id: String? = null, meterId: String, value: String, recordedAt: String, note: String?): String = database.withTransaction {
         validateInput(meterId, recordedAt, note)
         val normalized = canonicalDecimal(value)
         val existing = id?.let { database.readingDao().byId(it) }
         val entityId = existing?.id ?: UUID.randomUUID().toString()
         database.readingDao().upsert(ReadingEntity(entityId, meterId, normalized, recordedAt, note, false, existing?.serverRevision ?: 0))
         enqueue("reading", entityId, "upsert", existing?.serverRevision ?: 0, readingPayload(meterId, normalized, recordedAt, note))
+        entityId
     }
 
     suspend fun deleteReading(reading: ReadingEntity) = database.withTransaction {

@@ -71,3 +71,7 @@ A newly detected incident sends one message. Ongoing incidents remind every six 
 Deploy private configuration with `tools/deploy_backend.py --notifications-config utility-sync/.local-config/notifications.env` alongside the existing host/revision arguments. It uses SSH stdin and installs `/etc/utility-sync/notifications.env` as `0640 root:utility-sync`; secrets never enter arguments, Git archives or logs. Production monitor state is `/srv/utility-meter/monitor`, separate from the ledger database. `/api/v1/status` adds `notifications` with enabled/configured flags, attempt/success times, pending-event count and an error code, never provider responses or addresses.
 
 This monitor covers only the Pi while it can run and reach SMTP. It cannot send an immediate alert during total host power loss or complete network loss. No ECS probe is installed.
+
+## Notification recovery correction (1.3)
+
+Delivery failures are associated with their incident codes in durable notification state. An unsent incident cancelled after two healthy checks no longer leaves a stale delivery-error alert. Other pending incidents keep their error/backoff, including across restart. Legacy state files without the incident association are read compatibly. Corrected configuration errors clear after successful validation. Cancelling an obsolete event never changes `last_success_at` or claims that SMTP recovered. Ledger schema and synchronization protocol are unchanged.

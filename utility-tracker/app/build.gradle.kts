@@ -16,8 +16,8 @@ android {
         applicationId = "com.dowdah.utilitytracker"
         minSdk = 35
         targetSdk = 37
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 6
+        versionName = "1.3.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         testInstrumentationRunnerArguments["size"] = "medium"
@@ -74,6 +74,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.retrofit.kotlinx.serialization)
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.room.testing)
     androidTestImplementation(libs.androidx.uiautomator)
     androidTestImplementation(libs.okhttp.mockwebserver)

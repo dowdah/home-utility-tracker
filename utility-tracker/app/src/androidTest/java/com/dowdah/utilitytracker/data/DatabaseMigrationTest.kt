@@ -21,7 +21,7 @@ class DatabaseMigrationTest {
             execSQL("INSERT INTO sync_state VALUES (0, 'backend', 9, 123, 'network')")
             close()
         }
-        helper.runMigrationsAndValidate(name, 2, true, MIGRATION_1_2).use { db ->
+        helper.runMigrationsAndValidate(name, 3, true, MIGRATION_1_2, MIGRATION_2_3).use { db ->
             db.query("SELECT valueDecimal FROM readings WHERE id='reading'").use { assertTrue(it.moveToFirst()); assertEquals("100", it.getString(0)) }
             db.query("SELECT baseRevision,attemptCount,previousOperationId FROM outbox").use { assertTrue(it.moveToFirst()); assertEquals(7, it.getInt(0)); assertEquals(2, it.getInt(1)); assertTrue(it.isNull(2)) }
             db.query("SELECT cursorRevision,backendInstanceId FROM sync_state").use { assertTrue(it.moveToFirst()); assertEquals(9, it.getInt(0)); assertEquals("backend", it.getString(1)) }
@@ -29,4 +29,20 @@ class DatabaseMigrationTest {
             db.query("SELECT COUNT(*) FROM recharges").use { it.moveToFirst(); assertEquals(0, it.getInt(0)) }
         }
     }
+    @Test fun versionTwoUpgradeOnlyAddsLocalReminderSettings() {
+        val name = "migration-v2-reminders"
+        helper.createDatabase(name, 2).apply {
+            execSQL("INSERT INTO readings VALUES ('reading', 'meter', '42', '2026-10-03T00:00:00Z', 'pending draft', 0, 8)")
+            execSQL("INSERT INTO sync_state VALUES (0, 'same-backend', 12, 123, NULL, '{}')")
+            close()
+        }
+        helper.runMigrationsAndValidate(name, 3, true, MIGRATION_2_3).use { db ->
+            db.query("SELECT valueDecimal,serverRevision FROM readings").use { assertTrue(it.moveToFirst()); assertEquals("42",it.getString(0)); assertEquals(8,it.getInt(1)) }
+            db.query("SELECT backendInstanceId,cursorRevision FROM sync_state").use { assertTrue(it.moveToFirst()); assertEquals("same-backend",it.getString(0)); assertEquals(12,it.getInt(1)) }
+            db.execSQL("INSERT INTO reminder_schedule VALUES (0,15,0)")
+            db.execSQL("INSERT INTO meter_reminders VALUES ('meter',1,7,'12.5')")
+            db.query("SELECT COUNT(*) FROM outbox").use { it.moveToFirst(); assertEquals(0,it.getInt(0)) }
+        }
+    }
+
 }

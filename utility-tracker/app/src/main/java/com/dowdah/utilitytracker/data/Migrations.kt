@@ -13,3 +13,10 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         db.execSQL("ALTER TABLE sync_state ADD COLUMN serverStatusJson TEXT")
     }
 }
+
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("CREATE TABLE IF NOT EXISTS meter_reminders (meterId TEXT NOT NULL PRIMARY KEY, enabled INTEGER NOT NULL, daysThreshold INTEGER NOT NULL, quantityThreshold TEXT)")
+        db.execSQL("CREATE TABLE IF NOT EXISTS reminder_schedule (id INTEGER NOT NULL PRIMARY KEY, hour INTEGER NOT NULL, minute INTEGER NOT NULL)")
+    }
+}

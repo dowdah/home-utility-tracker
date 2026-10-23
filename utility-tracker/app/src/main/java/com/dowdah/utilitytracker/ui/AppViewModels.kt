@@ -12,6 +12,7 @@ import com.dowdah.utilitytracker.data.EndpointEntity
 import com.dowdah.utilitytracker.data.SyncResult
 import com.dowdah.utilitytracker.data.ExportRequest
 import com.dowdah.utilitytracker.data.defaultReadingMeterId
+import com.dowdah.utilitytracker.data.StatisticsMode
 import com.dowdah.utilitytracker.sync.SyncScheduler
 import java.time.Instant
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -57,10 +58,10 @@ class AppViewModel @Inject constructor(
     var rechargeTab: Boolean
         get() = rechargeTabState.value
         set(value) { rechargeTabState.value = value; savedState["rechargeTab"] = value }
-    private val statisticsModeState = mutableStateOf(savedState["statisticsMode"] ?: "month")
+    private val statisticsModeState = mutableStateOf(StatisticsMode.fromKey(savedState["statisticsMode"] ?: "month").key)
     var statisticsMode: String
         get() = statisticsModeState.value
-        set(value) { statisticsModeState.value = value; savedState["statisticsMode"] = value }
+        set(value) { statisticsModeState.value = StatisticsMode.fromKey(value).key; savedState["statisticsMode"] = statisticsModeState.value }
     private val statisticsAnchorState = mutableStateOf(savedState["statisticsAnchor"] ?: java.time.LocalDate.now().toString())
     var statisticsAnchor: String
         get() = statisticsAnchorState.value
@@ -99,6 +100,16 @@ class AppViewModel @Inject constructor(
         get() = recordFilterState.value
         set(value) { recordFilterState.value = value; savedState["recordFilter"] = value }
 
+    private val pendingReadingRevealState = mutableStateOf<String?>(savedState["pendingReadingRevealId"])
+    var pendingReadingRevealId: String?
+        get() = pendingReadingRevealState.value
+        private set(value) { pendingReadingRevealState.value = value; savedState["pendingReadingRevealId"] = value }
+
+    fun consumeReadingReveal(id: String) {
+        // An older layout acknowledgement must not consume a newer save.
+        if (pendingReadingRevealId == id) pendingReadingRevealId = null
+    }
+
     private val readingEditorOpenState = mutableStateOf(savedState["readingEditorOpen"] ?: false)
     private val readingEditorIdState = mutableStateOf<String?>(savedState["readingEditorId"])
     private val readingMeterIdState = mutableStateOf(savedState["readingMeterId"] ?: "")
@@ -129,10 +140,26 @@ class AppViewModel @Inject constructor(
     fun persistReadingDraft() = viewModelScope.launch {
         if (formBusy) return@launch
         formBusy = true
-        runCatching { repository.saveReading(readingEditorId, readingMeterId, readingValue, readingRecordedAt, readingNote.ifBlank { null }) }
-            .onSuccess { closeReadingEditor(); scheduler.enqueue(); message = "Saved locally" }.onFailure { message = it.message }
-        formBusy = false
+        val draft = ReadingSubmission(readingEditorId, readingMeterId, readingValue, readingRecordedAt, readingNote.ifBlank { null })
+        try {
+            val id = repository.saveReading(draft.id, draft.meterId, draft.value, draft.recordedAt, draft.note)
+            closeReadingEditor()
+            if (draft.id == null) {
+                rechargeTab = false
+                pendingReadingRevealId = id
+            }
+            scheduler.enqueue()
+            message = "Saved locally"
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (error: Exception) {
+            message = error.message
+        } finally {
+            formBusy = false
+        }
     }
+
+    private data class ReadingSubmission(val id: String?, val meterId: String, val value: String, val recordedAt: String, val note: String?)
 
     private val tariffEditorOpenState = mutableStateOf(savedState["tariffEditorOpen"] ?: false)
     private val tariffEditorIdState = mutableStateOf<String?>(savedState["tariffEditorId"])
@@ -177,6 +204,18 @@ class AppViewModel @Inject constructor(
     var statisticsEnd: String?
         get() = statisticsEndState.value
         set(value) { statisticsEndState.value = value; savedState["statisticsEnd"] = value }
+
+    fun selectStatisticsMode(value: String) {
+        if (value == StatisticsMode.CUSTOM.key) rangePickerOpen = true else statisticsMode = value
+    }
+
+    fun applyStatisticsDates(start: java.time.LocalDate, end: java.time.LocalDate, zone: java.time.ZoneId) {
+        require(end >= start)
+        statisticsStart = start.atStartOfDay(zone).toInstant().toString()
+        statisticsEnd = end.plusDays(1).atStartOfDay(zone).toInstant().minusNanos(1).toString()
+        statisticsMode = StatisticsMode.CUSTOM.key
+        rangePickerOpen = false
+    }
 
     fun saveReading(id: String? = null, meterId: String, value: String, recordedAt: String, note: String?) = viewModelScope.launch {
         runCatching { repository.saveReading(id, meterId, value, recordedAt, note) }

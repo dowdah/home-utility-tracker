@@ -1,7 +1,6 @@
 package com.dowdah.utilitytracker.ui
 
 import android.content.res.Configuration
-import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.safeDrawingPadding
@@ -113,12 +112,7 @@ class DailyRemainingUiTest {
     private fun recharge(at: String, quantity: String) =
         RechargeEntity("credit", "electric", "60", "0.6", quantity, "CNY", at, null, false, 1)
 
-    private fun screenshot(name: String) {
-        val bitmap = requireNotNull(InstrumentationRegistry.getInstrumentation().uiAutomation.takeScreenshot())
-        java.io.File(InstrumentationRegistry.getInstrumentation().targetContext.getExternalFilesDir(null), "$name.png")
-            .outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
-        bitmap.recycle()
-    }
+    private fun screenshot(name: String) = captureIsolatedWindow(name)
 
     private data class DisplayCase(val locale: Locale, val wide: Boolean, val dark: Boolean)
 }
